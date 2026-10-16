@@ -64,6 +64,8 @@
 LOG_CHANNEL(vk_drv_log, "DZN");
 extern "C" void uwp_heap_guard_open_log(const wchar_t* path);
 extern "C" void uwp_lazy_report(char* out, size_t size);
+extern "C" void* uwp_lazy_lookup(const char16_t* dll, const char* name);
+std::string uwp_measure_sleep();
 extern "C" void (*uwp_vkshim_log)(const char* where, const char* text);
 LOG_CHANNEL(sys_log, "SYS");
 
@@ -516,6 +518,18 @@ namespace
 				char missing[2048];
 				uwp_lazy_report(missing, sizeof(missing));
 				sys_log.always()("UWP: system functions missing on this device (calls fail): %s", missing[0] ? missing : "none");
+			}
+			{
+				// Ask for the finest scheduler tick (desktop RPCS3 does the same); timed waits otherwise wake on 15.6 ms ticks.
+				using res_fn = long(__stdcall*)(unsigned long, unsigned char, unsigned long*);
+				using query_fn = long(__stdcall*)(unsigned long*, unsigned long*, unsigned long*);
+				const auto set_res = reinterpret_cast<res_fn>(uwp_lazy_lookup(u"ntdll.dll", "NtSetTimerResolution"));
+				const auto query_res = reinterpret_cast<query_fn>(uwp_lazy_lookup(u"ntdll.dll", "NtQueryTimerResolution"));
+				unsigned long min_res = 0, max_res = 0, cur_res = 0, new_res = 0;
+				const long query = query_res ? query_res(&min_res, &max_res, &cur_res) : -1;
+				const long set = set_res && query == 0 ? set_res(max_res, 1, &new_res) : -1;
+				sys_log.always()("UWP: timer resolution %.2f ms (finest %.2f ms), set: 0x%x -> %.2f ms; %s", cur_res / 1e4, max_res / 1e4,
+					static_cast<u32>(set), new_res / 1e4, uwp_measure_sleep());
 			}
 
 			thread_ctrl::set_native_priority(0);
