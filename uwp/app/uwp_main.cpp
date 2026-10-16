@@ -711,7 +711,7 @@ namespace
 		static u32 last_change = 0;
 		static u32 reports = 0;
 
-		if (Emu.IsStopped(true) || !Emu.IsRunning())
+		if (Emu.IsStopped(true) || Emu.IsPaused())
 		{
 			last_change = ticks;
 			reports = 0;
@@ -752,8 +752,12 @@ namespace
 		});
 		if (const auto render = rsx::get_current_renderer(); render && render->ctrl)
 		{
-			fmt::append(out, "\n  RSX: get=0x%x put=0x%x last semaphore 0x%x (cmd at 0x%x)", +render->ctrl->get, +render->ctrl->put,
-				render->last_sema_addr, render->last_sema_cmd);
+			static u64 last_idle = 0;
+			const u64 idle = render->performance_counters.idle_time;
+			fmt::append(out, "\n  RSX: get=0x%x put=0x%x fifo=0x%x method=0x%x, idle %.2fs since last dump, last semaphore 0x%x (cmd at 0x%x)",
+				+render->ctrl->get, +render->ctrl->put, render->fifo_ctrl ? render->fifo_ctrl->get_pos() : 0, render->fifo_ctrl ? render->fifo_ctrl->last_cmd() : 0,
+				(idle - last_idle) / 1e6, render->last_sema_addr, render->last_sema_cmd);
+			last_idle = idle;
 		}
 		sys_log.always()("%s", out);
 	}
