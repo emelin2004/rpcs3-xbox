@@ -758,6 +758,10 @@ namespace
 				+render->ctrl->get, +render->ctrl->put, render->fifo_ctrl ? render->fifo_ctrl->get_pos() : 0, render->fifo_ctrl ? render->fifo_ctrl->last_cmd() : 0,
 				(idle - last_idle) / 1e6, render->last_sema_addr, render->last_sema_cmd);
 			last_idle = idle;
+			const auto& st = render->get_stats();
+			fmt::append(out, "\n  RSX since last flip: %u draws, %u submits, setup %.3fs, vertex upload %.3fs, texture upload %.3fs, draw exec %.3fs; %s",
+				st.draw_calls, st.submit_count, st.setup_time / 1e6, st.vertex_upload_time / 1e6, st.textures_upload_time / 1e6,
+				st.draw_exec_time / 1e6, render->get_stall_counters());
 		}
 		sys_log.always()("%s", out);
 	}

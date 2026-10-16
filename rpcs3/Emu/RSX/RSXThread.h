@@ -473,6 +473,8 @@ namespace rsx
 
 		// Get stats object
 		frame_statistics_t& get_stats() { return m_frame_stats; }
+		// Backend counters for stall reports (texture cache flushes, hard syncs); read from another thread
+		virtual std::string get_stall_counters() { return {}; }
 
 		// Returns true if the current thread is the active RSX thread
 		inline bool is_current_thread() const

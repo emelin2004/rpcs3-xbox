@@ -181,6 +181,8 @@ private:
 
 	shared_mutex m_flush_queue_mutex;
 	vk::flush_request_task m_flush_requests;
+	atomic_t<u64> m_hard_sync_count = 0;
+	atomic_t<u64> m_hard_sync_us = 0;
 
 	ullong m_last_cond_render_eval_hint = 0;
 
@@ -223,6 +225,7 @@ private:
 		VkPipelineStageFlags pipeline_stage_flags = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT);
 
 	void flush_command_queue(bool hard_sync = false, bool do_not_switch = false);
+	std::string get_stall_counters() override;
 	void queue_swap_request();
 	void frame_context_cleanup(vk::frame_context_t *ctx);
 	void advance_queued_frames();

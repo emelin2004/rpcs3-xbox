@@ -1564,12 +1564,22 @@ void VKGSRender::clear_surface(u32 mask)
 	}
 }
 
+std::string VKGSRender::get_stall_counters()
+{
+	return fmt::format("hard syncs %u (%.3fs), texture cache: %u flushes, %u misses, %u uploads",
+		m_hard_sync_count.load(), m_hard_sync_us.load() / 1e6, m_texture_cache.get_num_flush_requests(),
+		m_texture_cache.get_num_cache_misses(), m_texture_cache.get_texture_upload_calls_this_frame());
+}
+
 void VKGSRender::flush_command_queue(bool hard_sync, bool do_not_switch)
 {
 	close_and_submit_command_buffer();
 
 	if (hard_sync)
 	{
+		const u64 sync_start = get_system_time();
+		m_hard_sync_count++;
+
 		// wait for the latest instruction to execute
 		m_current_command_buffer->reset();
 
@@ -1583,6 +1593,7 @@ void VKGSRender::flush_command_queue(bool hard_sync, bool do_not_switch)
 		}
 
 		m_flush_requests.clear_pending_flag();
+		m_hard_sync_us += get_system_time() - sync_start;
 	}
 
 	if (!do_not_switch)
