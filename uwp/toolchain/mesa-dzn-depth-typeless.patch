@@ -1,0 +1,23 @@
+diff --git a/src/microsoft/vulkan/dzn_image.c b/src/microsoft/vulkan/dzn_image.c
+index b67d131..3bce6b0 100644
+--- a/src/microsoft/vulkan/dzn_image.c
++++ b/src/microsoft/vulkan/dzn_image.c
+@@ -207,6 +207,18 @@ dzn_image_create(struct dzn_device *device,
+        !pdev->options12.RelaxedFormatCastingSupported)
+       image->desc.Format = dzn_get_typeless_dxgi_format(image->desc.Format);
+ 
++   /* A depth image that is also sampled or copied gets its color format (R16_UNORM, R32_FLOAT)
++    * above. D3D12 accepts ALLOW_DEPTH_STENCIL on that only through a castable-format list
++    * (GetResourceAllocationInfo3/CreateCommittedResource3); without one (Xbox: FL 11_0, no
++    * relaxed casting) the description is invalid and the memory requirements come back empty.
++    * Use the typeless family instead, which every view format can be cast from. */
++   if (vk_format_is_depth_or_stencil(pCreateInfo->format) &&
++       image->vk.tiling == VK_IMAGE_TILING_OPTIMAL &&
++       (usage & VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT) &&
++       (image->desc.Format == DXGI_FORMAT_R16_UNORM || image->desc.Format == DXGI_FORMAT_R32_FLOAT) &&
++       !(device->dev10 && device->dev12 && image->castable_format_count > 0))
++      image->desc.Format = dzn_get_typeless_dxgi_format(image->desc.Format);
++
+    if (image->desc.SampleDesc.Count > 1)
+       image->desc.Alignment = D3D12_DEFAULT_MSAA_RESOURCE_PLACEMENT_ALIGNMENT;
+    else
