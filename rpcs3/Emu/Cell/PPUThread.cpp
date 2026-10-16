@@ -4793,8 +4793,12 @@ extern void ppu_initialize()
 
 	bool compile_main = false;
 
+	// The result is only used to queue the game directories for precompilation below, and the
+	// check hashes the whole executable (about 0.4 s for the XMB on Xbox), so skip it otherwise
+	const bool precompile_game_dirs = g_cfg.core.llvm_precompilation && !Emu.GetTitleID().empty() && !Emu.IsChildProcess();
+
 	// Check main module cache
-	if (!_main.segs.empty())
+	if (!_main.segs.empty() && precompile_game_dirs)
 	{
 		compile_main = ppu_initialize(_main, true);
 	}
@@ -4871,7 +4875,7 @@ extern void ppu_initialize()
 	}
 
 	// Avoid compilation if main's cache exists or it is a standalone SELF with no PARAM.SFO
-	if (compile_main && g_cfg.core.llvm_precompilation && !Emu.GetTitleID().empty() && !Emu.IsChildProcess())
+	if (compile_main && precompile_game_dirs)
 	{
 		// Try to add all related directories
 		const std::set<std::string> dirs = Emu.GetGameDirs();
@@ -4917,6 +4921,9 @@ static void ppu_vec_estimate(v128& v, u32 nj)
 bool ppu_initialize(const ppu_module<lv2_obj>& info, bool check_only, u64 file_size)
 {
 	ppu_log.notice("Entering ppu_initialize(const ppu_module&..)");
+
+	const u64 init_start = get_system_time();
+	u64 check_time = 0;
 
 	struct log_guard
 	{
@@ -5637,7 +5644,11 @@ bool ppu_initialize(const ppu_module<lv2_obj>& info, bool check_only, u64 file_s
 		}
 
 		// Check object file
-		if (jit_compiler::check(cache_path + obj_name))
+		const u64 check_start = get_system_time();
+		const bool obj_exists = jit_compiler::check(cache_path + obj_name);
+		check_time += get_system_time() - check_start;
+
+		if (obj_exists)
 		{
 			if (!is_being_used_in_emulation && !check_only)
 			{
@@ -5850,7 +5861,8 @@ bool ppu_initialize(const ppu_module<lv2_obj>& info, bool check_only, u64 file_s
 
 		usz mod_index = umax;
 
-		ppu_log.notice("Loading %u modules", link_workload.size());
+		ppu_log.notice("Loading %u modules (hashed and checked them in %.3fs, %.3fs of it checking cache files)", link_workload.size(),
+			(get_system_time() - init_start) / 1'000'000., check_time / 1'000'000.);
 
 		load_start = get_system_time();
 
