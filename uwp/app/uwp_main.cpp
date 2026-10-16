@@ -442,7 +442,28 @@ namespace
 		g_emu_callbacks.check_microphone_permissions = []() {};
 		g_emu_callbacks.make_video_source = []() -> std::unique_ptr<video_source> { return nullptr; };
 		g_emu_callbacks.enable_gamemode = [](bool) {};
-		g_emu_callbacks.get_database_config = [](const std::string&) -> std::string { return {}; };
+		// Per-game settings the Xbox port needs (RPCS3 applies them as the "database config" when the
+		// game has no custom config of its own).
+		g_emu_callbacks.get_database_config = [](const std::string& title_id) -> std::string
+		{
+			// Games whose PS3 online services are shut down and that wait forever on their servers
+			// while the PS3 network is connected; offline they take their offline path, as on RPCS3 for PC.
+			static constexpr std::string_view s_offline_titles[]
+			{
+				"BLES02021", "BLUS31410", "NPUB31457", // Plants vs. Zombies Garden Warfare
+			};
+
+			for (std::string_view id : s_offline_titles)
+			{
+				if (title_id == id)
+				{
+					sys_log.always()("UWP: %s: PS3 network off for this game (its online servers are gone)", title_id);
+					return "Net:\n  Internet enabled: Disconnected\n";
+				}
+			}
+
+			return {};
+		};
 
 		// Desktop resolves paths with Qt's canonicalFilePath (forward slashes, no trailing slash,
 		// empty if missing). Boot code relies on that, e.g. "/dev_flash" + path.substr(resolved
