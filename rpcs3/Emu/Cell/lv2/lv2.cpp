@@ -2200,8 +2200,11 @@ std::string uwp_measure_sleep()
 		return (get_system_time() - start) / 5000.;
 	};
 
-	atomic_t<u32> dummy = 0;
-	const double plain = measure([&] { thread_ctrl::wait_on(dummy, 0, 1000); });
+	// Called from the UI thread, which isn't a named_thread, so thread_ctrl waits can't be used here
+	const HANDLE never_set = CreateEventExW(nullptr, nullptr, 0, EVENT_ALL_ACCESS);
+	const double plain = never_set ? measure([&] { WaitForSingleObject(never_set, 1); }) : 0.;
+	if (never_set)
+		CloseHandle(never_set);
 	const double precise = measure([] { uwp_precise_sleep(1000); });
 	return fmt::format("a 1 ms wait takes %.2f ms by default, %.2f ms with the high-resolution timer", plain, precise);
 }
