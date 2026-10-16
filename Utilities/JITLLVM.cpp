@@ -267,7 +267,14 @@ struct MemoryManager1 : llvm::RTDyldMemoryManager
 
 	llvm::JITSymbol findSymbol(const std::string& name) override
 	{
-		u64 addr = RTDyldMemoryManager::getSymbolAddress(name);
+		// Guest function symbols ("__0x...", calls into another JIT instance) are never in a host DLL, so skip
+		// the process-wide search for them (suspected cause of 16.6 s of linking for Watch Dogs on Xbox).
+		u64 addr = m_symbols_cement && name.starts_with("__0x") ? m_symbols_cement(name) : 0;
+
+		if (!addr)
+		{
+			addr = RTDyldMemoryManager::getSymbolAddress(name);
+		}
 
 		if (!addr && m_symbols_cement)
 		{
@@ -394,7 +401,14 @@ struct MemoryManager2 : llvm::RTDyldMemoryManager
 
 	llvm::JITSymbol findSymbol(const std::string& name) override
 	{
-		u64 addr = RTDyldMemoryManager::getSymbolAddress(name);
+		// Guest function symbols ("__0x...", calls into another JIT instance) are never in a host DLL, so skip
+		// the process-wide search for them (suspected cause of 16.6 s of linking for Watch Dogs on Xbox).
+		u64 addr = m_symbols_cement && name.starts_with("__0x") ? m_symbols_cement(name) : 0;
+
+		if (!addr)
+		{
+			addr = RTDyldMemoryManager::getSymbolAddress(name);
+		}
 
 		if (!addr && m_symbols_cement)
 		{

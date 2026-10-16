@@ -5948,6 +5948,8 @@ bool ppu_initialize(const ppu_module<lv2_obj>& info, bool check_only, u64 file_s
 		{
 			jit->fin();
 		}
+
+		ppu_log.notice("Finalized %u JIT instances in %.3fs", jits.size(), (get_system_time() - link_start) / 1'000'000.);
 	}
 
 	{
