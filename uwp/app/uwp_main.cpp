@@ -65,7 +65,6 @@ LOG_CHANNEL(vk_drv_log, "DZN");
 extern "C" void uwp_heap_guard_open_log(const wchar_t* path);
 extern "C" void uwp_lazy_report(char* out, size_t size);
 extern "C" void* uwp_lazy_lookup(const char16_t* dll, const char* name);
-std::string uwp_measure_sleep();
 extern "C" void (*uwp_vkshim_log)(const char* where, const char* text);
 LOG_CHANNEL(sys_log, "SYS");
 
@@ -552,8 +551,8 @@ namespace
 				unsigned long min_res = 0, max_res = 0, cur_res = 0, new_res = 0;
 				const long query = query_res ? query_res(&min_res, &max_res, &cur_res) : -1;
 				const long set = set_res && query == 0 ? set_res(max_res, 1, &new_res) : -1;
-				sys_log.always()("UWP: timer resolution %.2f ms (finest %.2f ms), set: 0x%x -> %.2f ms; %s", cur_res / 1e4, max_res / 1e4,
-					static_cast<u32>(set), new_res / 1e4, uwp_measure_sleep());
+				sys_log.always()("UWP: timer resolution %.2f ms (finest %.2f ms), set: 0x%x -> %.2f ms", cur_res / 1e4, max_res / 1e4,
+					static_cast<u32>(set), new_res / 1e4);
 			}
 
 			thread_ctrl::set_native_priority(0);

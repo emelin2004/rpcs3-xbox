@@ -1,7 +1,4 @@
 #include "stdafx.h"
-#ifdef RPCS3_UWP
-#include <Windows.h>
-#endif
 #include "Emu/System.h"
 #include "Emu/system_config.h"
 #include "Emu/Memory/vm_ptr.h"
@@ -2159,57 +2156,6 @@ waitpkg_func static void __tpause(u32 cycles, u32 cstate)
 }
 #endif
 
-#ifdef RPCS3_UWP
-// Without timeBeginPeriod (not available to UWP apps) the Xbox wakes timed waits on the 15.6 ms
-// scheduler tick, so a guest usleep(1000) loop runs 15x slower. A high-resolution waitable timer
-// keeps its own precision regardless of the global timer resolution.
-static bool uwp_precise_sleep(u64 usec)
-{
-	struct timer_handle
-	{
-		HANDLE handle = CreateWaitableTimerExW(nullptr, nullptr, CREATE_WAITABLE_TIMER_HIGH_RESOLUTION, TIMER_ALL_ACCESS);
-		~timer_handle() { if (handle) CloseHandle(handle); }
-	};
-
-	static thread_local timer_handle timer;
-
-	if (!timer.handle)
-	{
-		return false;
-	}
-
-	LARGE_INTEGER due{};
-	due.QuadPart = -static_cast<s64>(usec * 10);
-
-	if (!SetWaitableTimerEx(timer.handle, &due, 0, nullptr, nullptr, nullptr, 0))
-	{
-		return false;
-	}
-
-	return WaitForSingleObject(timer.handle, INFINITE) == WAIT_OBJECT_0;
-}
-
-// Startup log line: how long 1 ms waits really take with the default wait and the precise timer
-std::string uwp_measure_sleep()
-{
-	auto measure = [](auto&& sleep_1ms)
-	{
-		const u64 start = get_system_time();
-		for (int i = 0; i < 5; i++)
-			sleep_1ms();
-		return (get_system_time() - start) / 5000.;
-	};
-
-	// Called from the UI thread, which isn't a named_thread, so thread_ctrl waits can't be used here
-	const HANDLE never_set = CreateEventExW(nullptr, nullptr, 0, EVENT_ALL_ACCESS);
-	const double plain = never_set ? measure([&] { WaitForSingleObject(never_set, 1); }) : 0.;
-	if (never_set)
-		CloseHandle(never_set);
-	const double precise = measure([] { uwp_precise_sleep(1000); });
-	return fmt::format("a 1 ms wait takes %.2f ms by default, %.2f ms with the high-resolution timer", plain, precise);
-}
-#endif
-
 bool lv2_obj::wait_timeout(u64 usec, ppu_thread* cpu, bool scale, bool is_usleep)
 {
 	static_assert(u64{umax} / max_timeout >= 100, "max timeout is not valid for scaling");
@@ -2298,12 +2244,6 @@ bool lv2_obj::wait_timeout(u64 usec, ppu_thread* cpu, bool scale, bool is_usleep
 				// With timerslack set low, Linux is precise for all values above
 				wait_for(remaining);
 #else
-#ifdef RPCS3_UWP
-				if (is_usleep && remaining < 20'000 && uwp_precise_sleep(remaining - (remaining % host_min_quantum)))
-				{
-				}
-				else
-#endif
 				// Wait on multiple of min quantum for large durations to avoid overloading low thread cpus
 				wait_for(remaining - (remaining % host_min_quantum));
 #endif
