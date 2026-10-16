@@ -11,6 +11,7 @@
 
 #include "util/asm.hpp"
 #include "util/coro.hpp"
+#include "util/vm.hpp"
 
 using namespace std::literals::string_literals;
 
@@ -661,6 +662,10 @@ namespace fs
 				const u64 pos = m_pos;
 				ovl.Offset = DWORD(pos);
 				ovl.OffsetHigh = DWORD(pos >> 32);
+#ifdef RPCS3_UWP
+				// The kernel can't fault in lazily committed guest pages (sys_vm memory).
+				utils::memory_commit_lazy(data, size);
+#endif
 				ensure(ReadFile(m_handle, data, size, &nread, &ovl) || GetLastError() == ERROR_HANDLE_EOF); // "file::read"
 				nread_sum += nread;
 				m_pos += nread;
@@ -689,6 +694,10 @@ namespace fs
 				OVERLAPPED ovl{};
 				ovl.Offset = DWORD(offset);
 				ovl.OffsetHigh = DWORD(offset >> 32);
+#ifdef RPCS3_UWP
+				// The kernel can't fault in lazily committed guest pages (sys_vm memory).
+				utils::memory_commit_lazy(data, size);
+#endif
 				ensure(ReadFile(m_handle, data, size, &nread, &ovl) || GetLastError() == ERROR_HANDLE_EOF); // "file::read"
 				nread_sum += nread;
 
@@ -718,6 +727,10 @@ namespace fs
 				const u64 pos = m_pos.fetch_add(size);
 				ovl.Offset = DWORD(pos);
 				ovl.OffsetHigh = DWORD(pos >> 32);
+#ifdef RPCS3_UWP
+				// The kernel can't fault in lazily committed guest pages (sys_vm memory).
+				utils::memory_commit_lazy(data, size);
+#endif
 				ensure(WriteFile(m_handle, data, size, &nwritten, &ovl)); // "file::write"
 				ensure(nwritten == size);
 				nwritten_sum += nwritten;

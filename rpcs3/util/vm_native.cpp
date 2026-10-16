@@ -542,6 +542,14 @@ namespace utils
 			return;
 		}
 
+#ifdef RPCS3_UWP
+		// Pages of lazily committed memory can't be protected before they are committed.
+		if (memory_commit_lazy(pointer, size) && ::VirtualProtect(pointer, size, +prot, &old))
+		{
+			return;
+		}
+#endif
+
 		for (u64 addr = reinterpret_cast<u64>(pointer), end = addr + size; addr < end;)
 		{
 			const u64 boundary = (addr + 0x10000) & -0x10000;
@@ -591,6 +599,95 @@ namespace utils
 		return result;
 #endif
 	}
+
+#if defined(_WIN32) && defined(RPCS3_UWP)
+	// Number of live lazily committed shm objects (memory_commit_lazy has nothing to do without them).
+	static atomic_t<u32> s_lazy_shm_count{0};
+
+	shm::shm(u64 size, lazy_commit_t)
+		: m_size(utils::align(size, 0x10000))
+	{
+		const ULARGE_INTEGER max_size{ .QuadPart = m_size };
+		m_handle = ::CreateFileMappingW(INVALID_HANDLE_VALUE, nullptr, PAGE_READWRITE | SEC_RESERVE, max_size.HighPart, max_size.LowPart, nullptr);
+		if (!m_handle)
+		{
+			uwp_mem_log.error("CreateFileMappingFromApp(0x%x bytes, SEC_RESERVE) failed (%u), committing in full", m_size, ::GetLastError());
+			m_handle = ensure(::CreateFileMappingW(INVALID_HANDLE_VALUE, nullptr, PAGE_READWRITE, max_size.HighPart, max_size.LowPart, nullptr));
+			return;
+		}
+
+		m_lazy = true;
+		s_lazy_shm_count++;
+		uwp_mem_log.notice("Lazily committed shm: 0x%x bytes", m_size);
+	}
+
+	bool memory_commit_lazy(const void* pointer, usz size)
+	{
+		if (!s_lazy_shm_count || !size)
+		{
+			return false;
+		}
+
+		bool found = false;
+
+		for (u64 addr = reinterpret_cast<u64>(pointer) & -0x1000, end = reinterpret_cast<u64>(pointer) + size; addr < end;)
+		{
+			::MEMORY_BASIC_INFORMATION mem{};
+			if (!::VirtualQuery(reinterpret_cast<void*>(addr), &mem, sizeof(mem)))
+			{
+				break;
+			}
+
+			const u64 region_end = reinterpret_cast<u64>(mem.BaseAddress) + mem.RegionSize;
+
+			// Uncommitted pages of a mapped view only exist in SEC_RESERVE sections, which only
+			// shm::lazy_commit creates.
+			if (mem.State == MEM_RESERVE && mem.Type == MEM_MAPPED)
+			{
+				found = true;
+
+				// Commit whole 64 KB granules around the range (fewer faults), within this view.
+				const u64 lo = std::max<u64>(addr & -0x10000, reinterpret_cast<u64>(mem.AllocationBase));
+				const u64 hi = std::min<u64>(utils::align<u64>(std::min(end, region_end), 0x10000), region_end);
+
+				if (!::VirtualAllocFromApp(reinterpret_cast<void*>(lo), hi - lo, MEM_COMMIT, PAGE_READWRITE) &&
+					!::VirtualAllocFromApp(reinterpret_cast<void*>(addr), std::min(end, region_end) - addr, MEM_COMMIT, PAGE_READWRITE))
+				{
+					uwp_mem_log.error("Committing lazy shm pages at 0x%x (0x%x bytes) failed (%u)", addr, std::min(end, region_end) - addr, ::GetLastError());
+					return false;
+				}
+
+				// A commit that leaves the page uncommitted would make the faulting access retry forever.
+				::MEMORY_BASIC_INFORMATION after{};
+				if (!::VirtualQuery(reinterpret_cast<void*>(addr), &after, sizeof(after)) || after.State != MEM_COMMIT)
+				{
+					uwp_mem_log.error("Lazy shm page at 0x%x still not committed (state=0x%x, protect=0x%x)", addr, after.State, after.Protect);
+					return false;
+				}
+
+				// Progress log every 16 MB committed.
+				static atomic_t<u64> s_committed{0};
+				const u64 before = s_committed.fetch_add(hi - lo);
+				if ((before >> 24) != ((before + hi - lo) >> 24))
+					uwp_mem_log.notice("Lazy shm: 0x%x bytes committed so far", before + hi - lo);
+			}
+
+			addr = region_end;
+		}
+
+		return found;
+	}
+#else
+	shm::shm(u64 size, lazy_commit_t)
+		: shm(size, 0u)
+	{
+	}
+
+	bool memory_commit_lazy(const void*, usz)
+	{
+		return false;
+	}
+#endif
 
 	shm::shm(u64 size, u32 flags)
 		: m_flags(flags)
@@ -923,6 +1020,10 @@ namespace utils
 
 #ifdef _WIN32
 		::CloseHandle(m_handle);
+#if defined(RPCS3_UWP)
+		if (m_lazy)
+			s_lazy_shm_count--;
+#endif
 #else
 		::close(m_file);
 #endif

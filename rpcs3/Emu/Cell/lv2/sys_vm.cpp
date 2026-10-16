@@ -2,6 +2,7 @@
 #include "sys_vm.h"
 #include "sys_process.h"
 
+#include "util/vm.hpp"
 #include "Emu/IdManager.h"
 #include "Emu/Cell/ErrorCodes.h"
 #include "Emu/Cell/PPUThread.h"
@@ -99,9 +100,25 @@ error_code sys_vm_memory_map(ppu_thread& ppu, u64 vsize, u64 psize, u32 cid, u64
 	{
 		sys_vm.warning("sys_vm_memory_map(): Found VM 0x%x area (vsize=0x%x)", area->addr, vsize);
 
+#ifdef RPCS3_UWP
+		// Back the area with lazily committed memory: only the pages the guest touches take RAM.
+		// Committing the whole vsize up front (e.g. 256 MB for the XMB web browser) fails under
+		// the Xbox's app memory limit.
+		if (~area->flags & vm::preallocated)
+		{
+			const auto shm = std::make_shared<utils::shm>(vsize, utils::shm::lazy_commit);
+			ensure(area->alloc(static_cast<u32>(vsize), &shm, 0x10000, area->flags & ~vm::alloc_prot_mask));
+		}
+		else
+		{
+			ensure(area->alloc(static_cast<u32>(vsize)));
+			vm::lock_sudo(area->addr, static_cast<u32>(vsize));
+		}
+#else
 		// Alloc all memory (shall not fail)
 		ensure(area->alloc(static_cast<u32>(vsize)));
 		vm::lock_sudo(area->addr, static_cast<u32>(vsize));
+#endif
 
 		idm::make<sys_vm_t>(area->addr, static_cast<u32>(vsize), ct, static_cast<u32>(psize));
 

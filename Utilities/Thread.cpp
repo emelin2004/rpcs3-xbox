@@ -2316,6 +2316,14 @@ static LONG exception_handler(PEXCEPTION_POINTERS pExp) noexcept
 	const bool is_writing = pExp->ExceptionRecord->ExceptionInformation[0] == 1;
 	const bool is_executing = pExp->ExceptionRecord->ExceptionInformation[0] == 8;
 
+#ifdef RPCS3_UWP
+	// First touch of a lazily committed page (sys_vm memory on UWP): commit it and retry.
+	if (pExp->ExceptionRecord->ExceptionCode == EXCEPTION_ACCESS_VIOLATION && !is_executing && utils::memory_commit_lazy(ptr, 1))
+	{
+		return EXCEPTION_CONTINUE_EXECUTION;
+	}
+#endif
+
 	if (pExp->ExceptionRecord->ExceptionCode == EXCEPTION_ACCESS_VIOLATION && !is_executing)
 	{
 		u32 addr = 0;

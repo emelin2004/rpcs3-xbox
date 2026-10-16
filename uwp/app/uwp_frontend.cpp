@@ -976,6 +976,7 @@ namespace uwp_frontend
 				{"LLVM compile threads", &g_cfg.core.llvm_threads, {"0", "1", "2", "3", "4", "6"}, "0 = automatic. Fewer threads use less memory while compiling."},
 #endif
 				{"Preferred SPU threads", &g_cfg.core.preferred_spu_threads, {"0", "1", "2", "3", "4", "5", "6"}, "0 = automatic."},
+				{"Network", &g_cfg.net.net_active, {"Connected", "Disconnected"}, "Internet access for the XMB and games (browser, updates, online modes)."},
 				{"System language", &g_cfg.sys.language, {}, {}},
 			};
 		}

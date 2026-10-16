@@ -66,6 +66,10 @@ namespace utils
 	// Map file descriptor
 	void* memory_map_fd(native_handle fd, usz size, protection prot);
 
+	// UWP: commit the not yet committed pages of lazily committed shm views in a range (see
+	// shm::lazy_commit). Returns true if the range touched such a view. Always false elsewhere.
+	bool memory_commit_lazy(const void* pointer, usz size);
+
 	// Shared memory handle
 	class shm
 	{
@@ -75,12 +79,20 @@ namespace utils
 		int m_file{};
 #endif
 		u32 m_flags{};
+		bool m_lazy{};
 		u64 m_size{};
 		atomic_t<void*> m_ptr{nullptr};
 		std::string m_storage;
 
 	public:
 		explicit shm(u64 size, u32 flags = 0);
+
+		// Memory that only takes RAM for the pages that get touched. On UWP pagefile-backed
+		// sections are committed (and charged to the app's memory limit) in full otherwise; there the
+		// pages are committed on first access by the access violation handler. Same as shm(size) elsewhere.
+		struct lazy_commit_t {};
+		static constexpr lazy_commit_t lazy_commit{};
+		shm(u64 size, lazy_commit_t);
 
 		// Construct with specified path as sparse file storage
 		shm(u64 size, const std::string& storage);
