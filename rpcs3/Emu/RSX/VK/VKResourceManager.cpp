@@ -133,6 +133,21 @@ namespace vk
 			rsx_log.warning("Memory type 0x%x has allocated more than %04.2fG. Currently allocated %04.2fG",
 				memory_type, size_in_GiB(s_vmm_warn_threshold_size), size_in_GiB(vmm_size));
 		}
+
+#ifdef RPCS3_UWP
+		// The Xbox ends the app silently past its memory limit: keep a trace of video memory growth.
+		{
+			u64 total = 0;
+			for (const auto& [type, size] : g_vmm_stats.memory_usage)
+				total += size.load();
+			constexpr u64 step = 128ull << 20;
+			if (memory_size >= (32ull << 20) || total / step != (total - memory_size) / step)
+			{
+				rsx_log.notice("UWP VRAM: +%llu MB (type %u, pool %d), total %llu MB",
+					memory_size >> 20, memory_type, static_cast<int>(pool), total >> 20);
+			}
+		}
+#endif
 	}
 
 	void vmm_notify_memory_freed(void* handle)

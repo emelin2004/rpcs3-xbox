@@ -265,16 +265,40 @@ namespace
 		return dir;
 	}
 
-	void log_app_memory(std::string_view when)
+	UINT64 get_app_memory_usage(UINT64* limit = nullptr)
 	{
+		UINT64 usage = 0;
 		winrt_min::IMemoryManagerStatics* mm = nullptr;
 		if (SUCCEEDED(winrt_min::get_factory(L"Windows.System.MemoryManager", winrt_min::IID_IMemoryManagerStatics, &mm)))
 		{
-			UINT64 usage = 0, limit = 0;
 			mm->get_AppMemoryUsage(&usage);
-			mm->get_AppMemoryUsageLimit(&limit);
-			sys_log.notice("UWP: app memory %.3f GB of %.3f GB (%s)", usage / 1073741824.0, limit / 1073741824.0, when);
+			if (limit)
+				mm->get_AppMemoryUsageLimit(limit);
 			mm->Release();
+		}
+		return usage;
+	}
+
+	void log_app_memory(std::string_view when)
+	{
+		UINT64 limit = 0;
+		const UINT64 usage = get_app_memory_usage(&limit);
+		sys_log.notice("UWP: app memory %.3f GB of %.3f GB (%s)", usage / 1073741824.0, limit / 1073741824.0, when);
+	}
+
+	// While a game runs: logs app memory every second when it moved by 64 MB or more, else every 10 s.
+	// The console ends an app silently when it goes over its limit, so the log keeps the trend.
+	void watch_app_memory(u32 ticks)
+	{
+		static UINT64 s_last = 0;
+		if (ticks % 100)
+			return;
+		const UINT64 usage = get_app_memory_usage();
+		const UINT64 diff = usage > s_last ? usage - s_last : s_last - usage;
+		if (diff >= (64ull << 20) || ticks % 1000 == 0)
+		{
+			s_last = usage;
+			log_app_memory("running");
 		}
 	}
 
@@ -646,8 +670,7 @@ namespace
 
 				if (g_state == shell_state::booting || g_state == shell_state::running)
 				{
-					if (ticks % 1000 == 0)
-						log_app_memory("running");
+					watch_app_memory(ticks);
 					start_background_precompile(ticks);
 					report_stall(ticks);
 				}
