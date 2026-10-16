@@ -4,6 +4,10 @@
 #include "Emu/system_config.h"
 #include "Utilities/File.h"
 #include <vulkan/vulkan_core.h>
+
+#ifdef RPCS3_UWP
+extern "C" void uwp_d3d12_watch_install(); // uwp/app/uwp_d3d12_watch.cpp
+#endif
 #ifdef __APPLE__
 #include <vulkan/vulkan_beta.h>
 #endif
@@ -870,6 +874,9 @@ namespace vk
 			device.pNext = &provoking_vertex_info;
 		}
 
+#ifdef RPCS3_UWP
+		uwp_d3d12_watch_install();
+#endif
 		if (auto error = vkCreateDevice(*pgpu, &device, nullptr, &dev))
 		{
 			dump_debug_info(requested_extensions, enabled_features);

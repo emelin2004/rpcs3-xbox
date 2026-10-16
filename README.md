@@ -1,3 +1,19 @@
+RPCS3 for Xbox (UWP)
+====================
+
+**This is a private, unofficial port of RPCS3 to Xbox Series X (UWP app, Developer Mode).**
+It is not supported by the RPCS3 team. Everything about the port (state, building, packaging,
+installing through Device Portal, controls, known issues) is in [uwp/README.md](uwp/README.md).
+
+Status on 2026-10-16: the PS3 XMB runs at 60 fps with network and web browser, Jetpack Joyride
+Deluxe (60 fps) and Minecraft PS3 Edition (~55 fps) are playable, Watch Dogs reaches its title
+screen (in-game loading still runs out of memory) and Plants vs. Zombies Garden Warfare reaches its
+main menu with the network off.
+
+The upstream RPCS3 README follows.
+
+---
+
 RPCS3
 =====
 

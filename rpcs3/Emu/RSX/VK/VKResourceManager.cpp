@@ -213,6 +213,20 @@ namespace vk
 		return vmm_get_application_pool_usage_impl(pool);
 	}
 
+	std::string vmm_get_usage_summary()
+	{
+		reader_lock lock(g_vmm_stats.mutex);
+
+		static constexpr const char* pool_names[] = { "undefined", "system", "surfaces", "textures", "swapchain", "scratch", "samplers" };
+		std::string result;
+		for (u32 pool = 0; pool < std::size(pool_names); pool++)
+		{
+			fmt::append(result, "%s%s %llu", pool ? ", " : "", pool_names[pool],
+				vmm_get_application_pool_usage_impl(static_cast<vmm_allocation_pool>(pool)) >> 20);
+		}
+		return result;
+	}
+
 	rsx::problem_severity vmm_determine_memory_load_severity()
 	{
 		reader_lock lock(g_vmm_stats.mutex);

@@ -97,6 +97,9 @@ namespace vk
 		virtual void set_safest_allocation_flags() {}
 		virtual void set_fastest_allocation_flags() {}
 
+		// Per-heap usage, for memory logs.
+		virtual std::string get_heap_summary() { return {}; }
+
 	protected:
 		VkDevice m_device;
 		VkFlags  m_allocation_flags;
@@ -126,6 +129,8 @@ namespace vk
 
 		void set_safest_allocation_flags() override;
 		void set_fastest_allocation_flags() override;
+
+		std::string get_heap_summary() override;
 
 	private:
 		VmaAllocator m_allocator;
@@ -208,6 +213,7 @@ namespace vk
 	void vmm_check_memory_usage();
 	u64  vmm_get_application_memory_usage(const memory_type_info& memory_type);
 	u64  vmm_get_application_pool_usage(vmm_allocation_pool pool);
+	std::string vmm_get_usage_summary();
 	bool vmm_handle_memory_pressure(rsx::problem_severity severity);
 	rsx::problem_severity vmm_determine_memory_load_severity();
 

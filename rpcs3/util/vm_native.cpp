@@ -527,6 +527,10 @@ namespace utils
 #endif
 	}
 
+#if defined(_WIN32) && defined(RPCS3_UWP)
+	static bool memory_protect_lazy(void* pointer, usz size, protection prot, bool keep_reserved);
+#endif
+
 	void memory_protect(void* pointer, usz size, protection prot)
 	{
 		if (!size)
@@ -544,7 +548,7 @@ namespace utils
 
 #ifdef RPCS3_UWP
 		// Pages of lazily committed memory can't be protected before they are committed.
-		if (memory_commit_lazy(pointer, size) && ::VirtualProtect(pointer, size, +prot, &old))
+		if (memory_protect_lazy(pointer, size, prot, false))
 		{
 			return;
 		}
@@ -604,8 +608,9 @@ namespace utils
 	// Number of live lazily committed shm objects (memory_commit_lazy has nothing to do without them).
 	static atomic_t<u32> s_lazy_shm_count{0};
 
-	shm::shm(u64 size, lazy_commit_t)
-		: m_size(utils::align(size, 0x10000))
+	shm::shm(u64 size, lazy_commit_t, u32 flags)
+		: m_flags(flags)
+		, m_size(utils::align(size, 0x10000))
 	{
 		const ULARGE_INTEGER max_size{ .QuadPart = m_size };
 		m_handle = ::CreateFileMappingW(INVALID_HANDLE_VALUE, nullptr, PAGE_READWRITE | SEC_RESERVE, max_size.HighPart, max_size.LowPart, nullptr);
@@ -618,7 +623,10 @@ namespace utils
 
 		m_lazy = true;
 		s_lazy_shm_count++;
-		uwp_mem_log.notice("Lazily committed shm: 0x%x bytes", m_size);
+		if (m_size >= 0x100'0000)
+		{
+			uwp_mem_log.notice("Lazily committed shm: %u MB (flags 0x%x)", m_size >> 20, flags);
+		}
 	}
 
 	bool memory_commit_lazy(const void* pointer, usz size)
@@ -677,15 +685,108 @@ namespace utils
 
 		return found;
 	}
+
+	// memory_protect for a range with lazily committed pages: pages nobody touched yet stay
+	// reserved when they become read-write (the fault handler commits them read-write), and
+	// when they become inaccessible because they are freed (keep_reserved); other protections
+	// commit them first (an inaccessible page must fault into RSX's handlers, not get committed).
+	// False if the range has no such pages.
+	static bool memory_protect_lazy(void* pointer, usz size, protection prot, bool keep_reserved)
+	{
+		if (!s_lazy_shm_count)
+		{
+			return false;
+		}
+
+		bool found = false;
+		DWORD old;
+
+		for (u64 addr = reinterpret_cast<u64>(pointer), end = addr + size; addr < end;)
+		{
+			::MEMORY_BASIC_INFORMATION mem{};
+			if (!::VirtualQuery(reinterpret_cast<void*>(addr), &mem, sizeof(mem)))
+			{
+				return false;
+			}
+
+			const u64 part_end = std::min<u64>(end, reinterpret_cast<u64>(mem.BaseAddress) + mem.RegionSize);
+			const auto part = reinterpret_cast<void*>(addr);
+
+			if (mem.State == MEM_RESERVE && mem.Type == MEM_MAPPED)
+			{
+				found = true;
+
+				if (prot != protection::rw && !(prot == protection::no && keep_reserved) &&
+					(!::VirtualAllocFromApp(part, part_end - addr, MEM_COMMIT, PAGE_READWRITE) || !::VirtualProtect(part, part_end - addr, +prot, &old)))
+				{
+					return false;
+				}
+			}
+			else if (!::VirtualProtect(part, part_end - addr, +prot, &old))
+			{
+				return false;
+			}
+
+			addr = part_end;
+		}
+
+		return found;
+	}
+
+	void memory_protect_freed(void* pointer, usz size)
+	{
+		if (!memory_protect_lazy(pointer, size, protection::no, true))
+		{
+			memory_protect(pointer, size, protection::no);
+		}
+	}
+
+	void memory_zero(void* pointer, usz size)
+	{
+		if (!s_lazy_shm_count)
+		{
+			std::memset(pointer, 0, size);
+			return;
+		}
+
+		for (u64 addr = reinterpret_cast<u64>(pointer), end = addr + size; addr < end;)
+		{
+			::MEMORY_BASIC_INFORMATION mem{};
+			if (!::VirtualQuery(reinterpret_cast<void*>(addr), &mem, sizeof(mem)))
+			{
+				std::memset(reinterpret_cast<void*>(addr), 0, end - addr);
+				return;
+			}
+
+			const u64 part_end = std::min<u64>(end, reinterpret_cast<u64>(mem.BaseAddress) + mem.RegionSize);
+
+			if (mem.State == MEM_COMMIT)
+			{
+				std::memset(reinterpret_cast<void*>(addr), 0, part_end - addr);
+			}
+
+			addr = part_end;
+		}
+	}
 #else
-	shm::shm(u64 size, lazy_commit_t)
-		: shm(size, 0u)
+	shm::shm(u64 size, lazy_commit_t, u32 flags)
+		: shm(size, flags)
 	{
 	}
 
 	bool memory_commit_lazy(const void*, usz)
 	{
 		return false;
+	}
+
+	void memory_protect_freed(void* pointer, usz size)
+	{
+		memory_protect(pointer, size, protection::no);
+	}
+
+	void memory_zero(void* pointer, usz size)
+	{
+		std::memset(pointer, 0, size);
 	}
 #endif
 
@@ -696,6 +797,12 @@ namespace utils
 #ifdef _WIN32
 		const ULARGE_INTEGER max_size{ .QuadPart = m_size };
 		m_handle = ensure(::CreateFileMappingW(INVALID_HANDLE_VALUE, nullptr, PAGE_EXECUTE_READWRITE, max_size.HighPart, max_size.LowPart, nullptr));
+#ifdef RPCS3_UWP
+		if (m_size >= 0x100'0000)
+		{
+			uwp_mem_log.warning("Fully committed shm: %u MB (flags 0x%x)", m_size >> 20, flags);
+		}
+#endif
 #elif defined(__linux__) || defined(__FreeBSD__)
 		m_file = -1;
 
@@ -745,6 +852,10 @@ namespace utils
 		if (!m_handle)
 		{
 			uwp_mem_log.fatal("CreateFileMappingFromApp(0x%x bytes) failed (%u)", m_size, ::GetLastError());
+		}
+		else if (m_size >= 0x100'0000)
+		{
+			uwp_mem_log.warning("Fully committed shm: %u MB (%s)", m_size >> 20, storage);
 		}
 #elif defined(_WIN32)
 		fs::file f;
@@ -1171,6 +1282,14 @@ namespace utils
 				if (prot != protection::rw && prot != protection::wx)
 				{
 					DWORD old;
+#ifdef RPCS3_UWP
+					// Lazily committed views have no committed pages to protect yet (and the fault handler
+					// only commits pages of allocated readable guest memory).
+					if (m_lazy && memory_protect_lazy(target, m_size, prot, true))
+					{
+					}
+					else
+#endif
 					if (!::VirtualProtect(target, m_size, +prot, &old))
 					{
 						UnmapViewOfFile2(GetCurrentProcess(), target, MEM_PRESERVE_PLACEHOLDER);
@@ -1260,6 +1379,10 @@ namespace utils
 		const auto target = reinterpret_cast<u8*>(reinterpret_cast<u64>(ptr) & -0x10000);
 
 #ifdef _WIN32
+		// Free (reserved or placeholder) neighbours only. The uncommitted pages of a lazily committed
+		// view next to this one are MEM_RESERVE too, but they belong to that view (MEM_MAPPED).
+		const auto is_free = [](const ::MEMORY_BASIC_INFORMATION& m) { return m.State == MEM_RESERVE && m.Type != MEM_MAPPED; };
+
 		if (is_memory_mappping_memory(ptr))
 		{
 			ensure(UnmapViewOfFile2(GetCurrentProcess(), target, MEM_PRESERVE_PLACEHOLDER));
@@ -1267,8 +1390,8 @@ namespace utils
 			::MEMORY_BASIC_INFORMATION mem{}, mem2{};
 			ensure(::VirtualQuery(target - 1, &mem, sizeof(mem)) && ::VirtualQuery(target + m_size, &mem2, sizeof(mem2)));
 
-			const auto size1 = mem.State == MEM_RESERVE ? target - static_cast<u8*>(mem.AllocationBase) : 0;
-			const auto size2 =  mem2.State == MEM_RESERVE ? mem2.RegionSize : 0;
+			const auto size1 = is_free(mem) ? target - static_cast<u8*>(mem.AllocationBase) : 0;
+			const auto size2 =  is_free(mem2) ? mem2.RegionSize : 0;
 
 			if (!size1 && !size2)
 			{
@@ -1287,20 +1410,20 @@ namespace utils
 			return;
 		}
 
-		if (mem.State == MEM_RESERVE && !::VirtualFree(mem.AllocationBase, 0, MEM_RELEASE))
+		if (is_free(mem) && !::VirtualFree(mem.AllocationBase, 0, MEM_RELEASE))
 		{
 			return;
 		}
 
-		if (mem2.State == MEM_RESERVE && !::VirtualFree(mem2.AllocationBase, 0, MEM_RELEASE))
+		if (is_free(mem2) && !::VirtualFree(mem2.AllocationBase, 0, MEM_RELEASE))
 		{
 			return;
 		}
 
-		const auto size1 = mem.State == MEM_RESERVE ? target - static_cast<u8*>(mem.AllocationBase) : 0;
-		const auto size2 = mem2.State == MEM_RESERVE ? mem2.RegionSize : 0;
+		const auto size1 = is_free(mem) ? target - static_cast<u8*>(mem.AllocationBase) : 0;
+		const auto size2 = is_free(mem2) ? mem2.RegionSize : 0;
 
-		if (!::VirtualAlloc(mem.State == MEM_RESERVE ? mem.AllocationBase : target, m_size + size1 + size2, MEM_RESERVE, PAGE_NOACCESS))
+		if (!::VirtualAlloc(is_free(mem) ? mem.AllocationBase : target, m_size + size1 + size2, MEM_RESERVE, PAGE_NOACCESS))
 		{
 			return;
 		}

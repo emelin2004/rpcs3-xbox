@@ -70,6 +70,12 @@ namespace utils
 	// shm::lazy_commit). Returns true if the range touched such a view. Always false elsewhere.
 	bool memory_commit_lazy(const void* pointer, usz size);
 
+	// memset to 0, except that UWP leaves lazily committed pages that were never touched alone.
+	void memory_zero(void* pointer, usz size);
+
+	// memory_protect(protection::no) for freed guest memory; UWP leaves untouched lazily committed pages reserved.
+	void memory_protect_freed(void* pointer, usz size);
+
 	// Shared memory handle
 	class shm
 	{
@@ -92,7 +98,7 @@ namespace utils
 		// pages are committed on first access by the access violation handler. Same as shm(size) elsewhere.
 		struct lazy_commit_t {};
 		static constexpr lazy_commit_t lazy_commit{};
-		shm(u64 size, lazy_commit_t);
+		shm(u64 size, lazy_commit_t, u32 flags = 0);
 
 		// Construct with specified path as sparse file storage
 		shm(u64 size, const std::string& storage);

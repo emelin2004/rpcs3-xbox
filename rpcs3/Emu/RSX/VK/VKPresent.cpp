@@ -13,6 +13,10 @@
 #include "util/asm.hpp"
 #include "util/video_provider.h"
 
+#ifdef RPCS3_UWP
+u32 g_uwp_pipeline_limit = 512; // LocalState/pipeline_limit (uwp_main.cpp)
+#endif
+
 extern atomic_t<bool> g_user_asked_for_screenshot;
 extern atomic_t<recording_mode> g_recording_mode;
 
@@ -425,6 +429,25 @@ vk::viewable_image* VKGSRender::get_present_source(/* inout */ vk::present_surfa
 
 void VKGSRender::flip(const rsx::display_flip_info_t& info)
 {
+#ifdef RPCS3_UWP
+	// Every pipeline costs host memory in Dozen/D3D12 (about 1 MB on the Xbox) and RPCS3 never frees them:
+	// evict ones unused for 10 s once more than g_uwp_pipeline_limit exist.
+	static u64 s_evicted_pipelines = 0;
+	if (m_prog_buffer)
+		s_evicted_pipelines += m_prog_buffer->evict_idle_pipelines(g_uwp_pipeline_limit, 10'000'000, m_program, m_prev_program,
+			[](std::unique_ptr<vk::glsl::program>& prog) { vk::get_gc()->dispose(prog); });
+
+	// Video memory by use every 10 s (it comes out of the app's 5 GB on the Xbox).
+	if (static u64 s_last_mem_log = 0; get_system_time() - s_last_mem_log >= 10'000'000)
+	{
+		s_last_mem_log = get_system_time();
+		rsx_log.notice("UWP VRAM: %s | pools MB: %s | texture cache %llu MB (%u unreleased), surface cache %llu MB | %s | %llu pipelines (%llu evicted)",
+			vk::get_current_mem_allocator()->get_heap_summary(), vk::vmm_get_usage_summary(),
+			m_texture_cache.get_texture_memory_in_use() >> 20, m_texture_cache.get_unreleased_textures_count(), m_rtts.m_active_memory_used >> 20,
+			vk::get_descriptor_pool_stats(), m_prog_buffer ? m_prog_buffer->pipeline_count() : 0, s_evicted_pipelines);
+	}
+#endif
+
 	// Check swapchain condition/status
 	if (!m_swapchain->supports_automatic_wm_reports())
 	{

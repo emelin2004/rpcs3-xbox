@@ -12,6 +12,12 @@
 #include <span>
 #include <unordered_map>
 
+#ifdef RPCS3_UWP
+#include "Emu/Cell/timers.hpp"
+#include <algorithm>
+#include <vector>
+#endif
+
 enum class SHADER_TYPE
 {
 	SHADER_TYPE_VERTEX,
@@ -378,6 +384,9 @@ public:
 			if (const auto I = m_storage.find(key); I != m_storage.end())
 			{
 				m_cache_miss_flag = (I->second == __null_pipeline_handle);
+#ifdef RPCS3_UWP
+				if (I->second) I->second->uwp_last_use = get_system_time();
+#endif
 				return { I->second.get(), &vertex_program, &fragment_program };
 			}
 		}
@@ -389,6 +398,9 @@ public:
 			if (const auto I = m_storage.find(key); I != m_storage.end())
 			{
 				m_cache_miss_flag = (I->second == __null_pipeline_handle);
+#ifdef RPCS3_UWP
+				if (I->second) I->second->uwp_last_use = get_system_time();
+#endif
 				return { I->second.get(), &vertex_program, &fragment_program };
 			}
 
@@ -416,6 +428,9 @@ public:
 				std::lock_guard lock(m_pipeline_mutex);
 				auto& pipe_result = m_storage[key];
 				pipe_result = std::move(pipeline);
+#ifdef RPCS3_UWP
+				pipe_result->uwp_last_use = get_system_time();
+#endif
 				return pipe_result.get();
 			};
 		}
@@ -431,6 +446,9 @@ public:
 				std::lock_guard lock(m_pipeline_mutex);
 				auto& pipe_result = m_storage[key];
 				pipe_result = std::move(pipeline);
+#ifdef RPCS3_UWP
+				pipe_result->uwp_last_use = get_system_time();
+#endif
 				return pipe_result.get();
 			};
 		}
@@ -457,6 +475,51 @@ public:
 
 		rsx::write_fragment_constants_to_buffer(dst_buffer, rsx_prog, fragment_program.constant_offsets, sanitize);
 	}
+
+#ifdef RPCS3_UWP
+	// Xbox memory budget: every live pipeline costs host memory in the D3D12 translation layer, and RPCS3
+	// keeps them all. When more than max_live exist, hand the least recently used ones that have not been
+	// looked up for min_idle_us to dispose (deferred destruction) until 7/8 of max_live are left. They are
+	// rebuilt from their (kept) shaders when needed again. Returns how many were evicted.
+	template <typename Disposer>
+	usz evict_idle_pipelines(usz max_live, u64 min_idle_us, const pipeline_type* keep1, const pipeline_type* keep2, Disposer&& dispose)
+	{
+		if (!max_live || m_storage.size() <= max_live)
+		{
+			return 0;
+		}
+
+		std::lock_guard lock(m_pipeline_mutex);
+
+		const u64 now = get_system_time();
+		std::vector<std::pair<u64, typename decltype(m_storage)::iterator>> idle;
+		for (auto it = m_storage.begin(); it != m_storage.end(); ++it)
+		{
+			const auto* prog = it->second.get();
+			if (prog && prog != keep1 && prog != keep2 && now - prog->uwp_last_use >= min_idle_us)
+			{
+				idle.emplace_back(prog->uwp_last_use, it);
+			}
+		}
+
+		const usz target = max_live - max_live / 8;
+		const usz count = std::min(idle.size(), m_storage.size() - std::min(m_storage.size(), target));
+		std::partial_sort(idle.begin(), idle.begin() + count, idle.end(), [](const auto& a, const auto& b) { return a.first < b.first; });
+
+		for (usz i = 0; i < count; i++)
+		{
+			dispose(idle[i].second->second);
+			m_storage.erase(idle[i].second);
+		}
+
+		return count;
+	}
+
+	usz pipeline_count() const
+	{
+		return m_storage.size();
+	}
+#endif
 
 	void clear()
 	{

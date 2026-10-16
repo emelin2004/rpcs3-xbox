@@ -964,7 +964,6 @@ namespace uwp_frontend
 		std::vector<setting_item> make_settings()
 		{
 			return {
-				{"Renderer", &g_cfg.video.renderer, {"Vulkan", "Null"}, "Vulkan runs through Mesa Dozen on D3D12. Null draws nothing (CPU tests)."},
 				{"Resolution scale", &g_cfg.video.resolution_scale_percent, {"50", "75", "100", "150", "200", "300"}, "Internal rendering resolution in percent of 720p."},
 				{"Frame limit", &g_cfg.video.frame_limit, {}, "Auto follows the game's refresh rate."},
 				{"VSync", &g_cfg.video.vsync, {}, {}},

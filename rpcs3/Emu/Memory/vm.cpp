@@ -1053,12 +1053,12 @@ namespace vm
 		}
 		else if (is_noop)
 		{
-			std::memset(g_sudo_addr + addr, 0, size);
+			utils::memory_zero(g_sudo_addr + addr, size);
 		}
 		else if (!shm)
 		{
-			utils::memory_protect(g_base_addr + addr, size, utils::protection::no);
-			std::memset(g_sudo_addr + addr, 0, size);
+			utils::memory_protect_freed(g_base_addr + addr, size);
+			utils::memory_zero(g_sudo_addr + addr, size);
 		}
 		else
 		{
@@ -1364,7 +1364,13 @@ namespace vm
 			};
 
 			// Special path for whole-allocated areas allowing 4k granularity
+#ifdef RPCS3_UWP
+			// Page-file sections are committed in full on UWP (the whole 256 MB stack and video
+			// blocks would count against the Xbox's 5 GB): commit pages when they are first touched.
+			m_common = std::make_shared<utils::shm>(size, utils::shm::lazy_commit);
+#else
 			m_common = std::make_shared<utils::shm>(size, fmt::format("_block_x%08x", addr));
+#endif
 
 			if (!map_critical(vm::_ptr<u8>(addr), this->flags & block_size_4k && utils::get_page_size() > 4096 ? utils::protection::rw : utils::protection::no) || !map_critical(vm::get_super_ptr(addr), utils::protection::rw))
 			{
@@ -1493,7 +1499,12 @@ namespace vm
 			shm = *src;
 		else
 		{
+#ifdef RPCS3_UWP
+			// Allocations take RAM only for the pages that get touched (see block_t::block_t).
+			shm = std::make_shared<utils::shm>(size, utils::shm::lazy_commit);
+#else
 			shm = std::make_shared<utils::shm>(size);
+#endif
 		}
 
 		const u32 max = (this->addr + this->size - size) & (0 - align);
@@ -1572,7 +1583,12 @@ namespace vm
 			shm = *src;
 		else
 		{
+#ifdef RPCS3_UWP
+			// Allocations take RAM only for the pages that get touched (see block_t::block_t).
+			shm = std::make_shared<utils::shm>(size, utils::shm::lazy_commit);
+#else
 			shm = std::make_shared<utils::shm>(size);
+#endif
 		}
 
 		vm::writer_lock lock;
@@ -1880,7 +1896,11 @@ namespace vm
 	{
 		if (flags & preallocated)
 		{
+#ifdef RPCS3_UWP
+			m_common = std::make_shared<utils::shm>(size, utils::shm::lazy_commit);
+#else
 			m_common = std::make_shared<utils::shm>(size, fmt::format("_block_x%08x", addr));
+#endif
 			m_common->map_critical(vm::base(addr), this->flags & block_size_4k && utils::get_page_size() > 4096 ? utils::protection::rw : utils::protection::no);
 			m_common->map_critical(vm::get_super_ptr(addr));
 		}

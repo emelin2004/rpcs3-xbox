@@ -2318,7 +2318,10 @@ static LONG exception_handler(PEXCEPTION_POINTERS pExp) noexcept
 
 #ifdef RPCS3_UWP
 	// First touch of a lazily committed page (sys_vm memory on UWP): commit it and retry.
-	if (pExp->ExceptionRecord->ExceptionCode == EXCEPTION_ACCESS_VIOLATION && !is_executing && utils::memory_commit_lazy(ptr, 1))
+	// Not for guest pages that aren't allocated: those must still fault as on a PS3.
+	if (pExp->ExceptionRecord->ExceptionCode == EXCEPTION_ACCESS_VIOLATION && !is_executing &&
+		(static_cast<usz>(ptr - vm::g_base_addr) >= 0x1'0000'0000 || vm::check_addr(static_cast<u32>(ptr - vm::g_base_addr))) &&
+		utils::memory_commit_lazy(ptr, 1))
 	{
 		return EXCEPTION_CONTINUE_EXECUTION;
 	}

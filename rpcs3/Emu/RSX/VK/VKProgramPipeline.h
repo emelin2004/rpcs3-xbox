@@ -198,6 +198,12 @@ namespace vk
 
 		class program
 		{
+		public:
+#ifdef RPCS3_UWP
+			// Last lookup time (us), for evicting programs that have not been used for a while (Xbox memory budget).
+			u64 uwp_last_use = 0;
+#endif
+		private:
 			VkDevice m_device = VK_NULL_HANDLE;
 			VkPipeline m_pipeline = VK_NULL_HANDLE;
 			VkPipelineLayout m_pipeline_layout = VK_NULL_HANDLE;

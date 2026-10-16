@@ -8,6 +8,10 @@
 
 #include "../Program/SPIRVCommon.h"
 
+#ifdef RPCS3_UWP
+u32 g_uwp_desc_pool_max = 4096;
+#endif
+
 namespace vk
 {
 	namespace glsl
@@ -710,7 +714,12 @@ namespace vk
 		void descriptor_table_t::create_descriptor_pool()
 		{
 			m_descriptor_pool = std::make_unique<descriptor_pool>();
+			#ifdef RPCS3_UWP
+			// Test switch for the Xbox memory budget: LocalState/desc_pool_max (see uwp_main.cpp).
+			m_descriptor_pool->create(*vk::g_render_device, m_descriptor_pool_sizes, 16u, g_uwp_desc_pool_max);
+#else
 			m_descriptor_pool->create(*vk::g_render_device, m_descriptor_pool_sizes, 16u, 4096u);
+#endif
 		}
 
 		void descriptor_table_t::validate() const

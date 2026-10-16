@@ -9,6 +9,9 @@ add_executable(rpcs3_uwp WIN32
     uwp_lazyimports.c
     uwp_lazyresolve.c
     uwp_heap_guard.cpp
+    uwp_d3d12_watch.cpp
+    uwp_localized.cpp
+    ${CMAKE_BINARY_DIR}/uwp_localized/uwp_localized_strings.inc
     ${CMAKE_SOURCE_DIR}/rpcs3/rpcs3_version.cpp
     # Qt-free input code (upstream builds these in the Qt UI target).
     ${CMAKE_SOURCE_DIR}/rpcs3/Input/ds3_pad_handler.cpp
@@ -30,7 +33,8 @@ add_executable(rpcs3_uwp WIN32
 
 target_include_directories(rpcs3_uwp PRIVATE
     ${CMAKE_SOURCE_DIR}/rpcs3
-    ${CMAKE_SOURCE_DIR})
+    ${CMAKE_SOURCE_DIR}
+    ${CMAKE_BINARY_DIR}/uwp_localized)
 
 target_compile_definitions(rpcs3_uwp PRIVATE UNICODE _UNICODE)
 target_link_libraries(rpcs3_uwp PRIVATE
@@ -43,8 +47,16 @@ target_link_options(rpcs3_uwp PRIVATE -municode -Wl,--subsystem,windows -Wl,--st
 
 set_target_properties(rpcs3_uwp PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/uwp)
 
-# Diagnostic app: reports which of rpcs3_uwp.exe's imports a device is missing.
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
+
+# English overlay strings (home menu, dialogs), taken from the Qt UI's localized_emu.h.
+add_custom_command(
+    OUTPUT ${CMAKE_BINARY_DIR}/uwp_localized/uwp_localized_strings.inc
+    COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_BINARY_DIR}/uwp_localized
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/gen_localized.py ${CMAKE_SOURCE_DIR}/rpcs3/rpcs3qt/localized_emu.h ${CMAKE_BINARY_DIR}/uwp_localized/uwp_localized_strings.inc
+    DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/gen_localized.py ${CMAKE_SOURCE_DIR}/rpcs3/rpcs3qt/localized_emu.h)
+
+# Diagnostic app: reports which of rpcs3_uwp.exe's imports a device is missing.
 add_custom_command(
     OUTPUT ${CMAKE_BINARY_DIR}/uwp_importcheck/import_table.h
     COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_BINARY_DIR}/uwp_importcheck

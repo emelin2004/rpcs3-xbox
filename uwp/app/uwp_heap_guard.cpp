@@ -10,6 +10,7 @@
 #include <cstdio>
 #include <cstdint>
 #include <new>
+#include <atomic>
 
 extern "C" IMAGE_DOS_HEADER __ImageBase;
 
@@ -79,6 +80,45 @@ namespace
 		__fastfail(50); // FAST_FAIL_HEAP_METADATA_CORRUPTION
 	}
 
+	// Live operator new bytes per caller (open addressing, never removed), for memory logs.
+	struct caller_slot
+	{
+		std::atomic<std::uintptr_t> caller{0};
+		std::atomic<std::int64_t> bytes{0};
+		std::atomic<std::int64_t> count{0};
+	};
+	constexpr std::size_t c_slots = 16384;
+	caller_slot s_callers[c_slots];
+	std::atomic<std::int64_t> s_live_bytes{0}, s_live_count{0};
+
+	caller_slot* find_slot(void* caller_ptr)
+	{
+		const std::uintptr_t caller = reinterpret_cast<std::uintptr_t>(caller_ptr) | 1;
+		std::size_t i = (caller * 0x9E3779B97F4A7C15ull) >> 50;
+		for (std::size_t n = 0; n < c_slots; n++, i = (i + 1) % c_slots)
+		{
+			std::uintptr_t cur = s_callers[i].caller.load(std::memory_order_relaxed);
+			if (cur == caller)
+				return &s_callers[i];
+			if (cur == 0 && s_callers[i].caller.compare_exchange_strong(cur, caller))
+				return &s_callers[i];
+			if (cur == caller)
+				return &s_callers[i];
+		}
+		return nullptr;
+	}
+
+	void account(void* caller, std::int64_t size, std::int64_t count)
+	{
+		s_live_bytes.fetch_add(size, std::memory_order_relaxed);
+		s_live_count.fetch_add(count, std::memory_order_relaxed);
+		if (caller_slot* slot = find_slot(caller))
+		{
+			slot->bytes.fetch_add(size, std::memory_order_relaxed);
+			slot->count.fetch_add(count, std::memory_order_relaxed);
+		}
+	}
+
 	void* guarded_alloc(std::size_t size, std::size_t align, void* caller)
 	{
 		const std::size_t a = align > 16 ? align : 16;
@@ -96,6 +136,7 @@ namespace
 		h->magic = c_magic_live;
 		h->magic_inv = ~c_magic_live;
 		std::memset(user + size, c_canary, c_tail);
+		account(caller, static_cast<std::int64_t>(size), 1);
 		return user;
 	}
 
@@ -118,6 +159,7 @@ namespace
 		}
 		h->magic = c_magic_dead;
 		h->magic_inv = ~c_magic_dead;
+		account(h->caller, -static_cast<std::int64_t>(h->size), -1);
 		std::free(h->raw);
 	}
 
@@ -135,6 +177,30 @@ namespace
 			handler();
 		}
 	}
+}
+
+// Live operator new bytes and blocks, and the callers holding the most (exe-relative addresses).
+extern "C" void uwp_heap_guard_summary(char* buf, std::size_t size, unsigned top)
+{
+	struct entry { std::uintptr_t caller; std::int64_t bytes, count; };
+	entry best[16]{};
+	top = top > 16 ? 16 : top;
+	for (auto& slot : s_callers)
+	{
+		const std::uintptr_t caller = slot.caller.load(std::memory_order_relaxed);
+		const std::int64_t bytes = slot.bytes.load(std::memory_order_relaxed);
+		if (!caller || top == 0 || bytes <= best[top - 1].bytes)
+			continue;
+		unsigned i = top - 1;
+		for (; i > 0 && best[i - 1].bytes < bytes; i--)
+			best[i] = best[i - 1];
+		best[i] = {caller & ~std::uintptr_t{1}, bytes, slot.count.load(std::memory_order_relaxed)};
+	}
+	int n = std::snprintf(buf, size, "operator new live %lld MB in %lld blocks; top callers:",
+		static_cast<long long>(s_live_bytes.load() >> 20), static_cast<long long>(s_live_count.load()));
+	for (unsigned i = 0; i < top && best[i].caller && n > 0 && static_cast<std::size_t>(n) < size; i++)
+		n += std::snprintf(buf + n, size - n, " exe+0x%llx %lld MB/%lld", static_cast<unsigned long long>(rva(reinterpret_cast<void*>(best[i].caller))),
+			static_cast<long long>(best[i].bytes >> 20), static_cast<long long>(best[i].count));
 }
 
 extern "C" void uwp_heap_guard_open_log(const wchar_t* path)

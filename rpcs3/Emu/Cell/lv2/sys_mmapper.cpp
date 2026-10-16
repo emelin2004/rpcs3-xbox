@@ -762,7 +762,12 @@ error_code sys_mmapper_map_shared_memory(ppu_thread& ppu, u32 addr, u32 mem_id, 
 			// Insert atomically the memory handle (laziliy allocated)
 			if (!to_insert)
 			{
+#ifdef RPCS3_UWP
+				// Only the pages the game touches take RAM (they count against the Xbox's 5 GB).
+				to_insert = make_single_value(std::make_shared<utils::shm>(mem.size, utils::shm::lazy_commit, 1 /* shareable flag */));
+#else
 				to_insert = make_single_value(std::make_shared<utils::shm>(mem.size, 1 /* shareable flag */));
+#endif
 			}
 
 			null.reset();
@@ -837,7 +842,12 @@ error_code sys_mmapper_search_and_map(ppu_thread& ppu, u32 start_addr, u32 mem_i
 			// Insert atomically the memory handle (laziliy allocated)
 			if (!to_insert)
 			{
+#ifdef RPCS3_UWP
+				// Only the pages the game touches take RAM (they count against the Xbox's 5 GB).
+				to_insert = make_single_value(std::make_shared<utils::shm>(mem.size, utils::shm::lazy_commit, 1 /* shareable flag */));
+#else
 				to_insert = make_single_value(std::make_shared<utils::shm>(mem.size, 1 /* shareable flag */));
+#endif
 			}
 
 			null.reset();

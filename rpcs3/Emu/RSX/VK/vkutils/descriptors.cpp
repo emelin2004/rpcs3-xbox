@@ -138,6 +138,24 @@ namespace vk
 		return current_size;
 	}
 
+	// Live descriptor pools, for memory logs (Dozen backs each one with CPU descriptor heaps).
+	static atomic_t<u64> s_live_pools{0}, s_live_sets{0}, s_live_descriptors{0};
+
+	static u64 descriptors_per_set(const rsx::simple_array<VkDescriptorPoolSize>& sizes)
+	{
+		u64 count = 0;
+		for (const auto& size : sizes)
+		{
+			count += size.descriptorCount;
+		}
+		return count;
+	}
+
+	std::string get_descriptor_pool_stats()
+	{
+		return fmt::format("%llu descriptor pools, %llu sets, %llu descriptors", s_live_pools.load(), s_live_sets.load(), s_live_descriptors.load());
+	}
+
 	void descriptor_pool::create(const vk::render_device& dev, const rsx::simple_array<VkDescriptorPoolSize>& pool_sizes, u32 min_sets, u32 max_sets)
 	{
 		m_autoscaling_config.min_pool_size = std::max(min_sets, 16u);
@@ -165,6 +183,9 @@ namespace vk
 		{
 			vkDestroyDescriptorPool((*m_owner), pool.handle, nullptr);
 			pool.handle = VK_NULL_HANDLE;
+			s_live_pools--;
+			s_live_sets -= pool.size;
+			s_live_descriptors -= pool.size * descriptors_per_set(m_create_info_pool_sizes);
 		}
 
 		m_owner = nullptr;
@@ -335,6 +356,12 @@ namespace vk
 		{
 			// Roll back autoscaling
 			m_autoscaling_config = prev_scaling_config;
+		}
+		else
+		{
+			s_live_pools++;
+			s_live_sets += set_count;
+			s_live_descriptors += set_count * descriptors_per_set(m_create_info_pool_sizes);
 		}
 
 		// Cleanup

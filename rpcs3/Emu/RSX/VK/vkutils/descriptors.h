@@ -10,6 +10,8 @@
 
 namespace vk
 {
+	std::string get_descriptor_pool_stats();
+
 	struct gc_callback_t
 	{
 		std::function<void()> m_callback;

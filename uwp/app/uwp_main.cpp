@@ -13,6 +13,7 @@
 #include <winsock2.h>
 #include "winrt_min.h"
 #include "uwp_frontend.h"
+#include "uwp_localized.h"
 
 #include "Emu/System.h"
 #include "Emu/system_config.h"
@@ -58,6 +59,7 @@
 #include <map>
 #include <mutex>
 #include <vector>
+#include <unordered_map>
 #include <d3d11_1.h>
 #include <dxgi1_2.h>
 
@@ -73,6 +75,9 @@ extern std::string g_android_config_dir;
 extern std::string g_android_cache_dir;
 extern void ppu_precompile(std::vector<std::string>& dir_queue, std::vector<ppu_module<lv2_obj>*>* loaded_modules, bool is_fast_compilation);
 extern thread_local bool g_ppu_precompile_prx_only;
+
+extern u32 g_uwp_desc_pool_max; // VKProgramPipeline.cpp
+extern u32 g_uwp_pipeline_limit; // VKPresent.cpp
 
 namespace
 {
@@ -264,6 +269,98 @@ namespace
 		return dir;
 	}
 
+	extern "C" void uwp_heap_guard_summary(char* buf, std::size_t size, unsigned top);
+	extern "C" void uwp_d3d12_watch_summary(char* buf, std::size_t size);
+
+	// What the committed memory of this process is, by kind, from a walk of the address space.
+	// Guest memory is counted in the sudo view only (the base view maps the same sections).
+	void log_memory_breakdown()
+	{
+		const u64 base = reinterpret_cast<u64>(vm::g_base_addr), sudo = reinterpret_cast<u64>(vm::g_sudo_addr);
+		const u64 exec = reinterpret_cast<u64>(vm::g_exec_addr), stat = reinterpret_cast<u64>(vm::g_stat_addr);
+		auto in = [](u64 a, u64 start, u64 size) { return a >= start && a < start + size; };
+
+		u64 guest = 0, guest_base = 0, exec_table = 0, stat_area = 0, jit = 0, mapped = 0, priv = 0, image = 0, total = 0;
+		u64 biggest_priv = 0, biggest_priv_addr = 0;
+		std::unordered_map<u64, u64> priv_by_base; // committed private bytes per allocation
+
+		for (u64 addr = 0x10000; addr < 0x7fff'ffff'0000;)
+		{
+			MEMORY_BASIC_INFORMATION mem{};
+			if (!VirtualQuery(reinterpret_cast<void*>(addr), &mem, sizeof(mem)))
+				break;
+
+			const u64 start = reinterpret_cast<u64>(mem.BaseAddress), size = mem.RegionSize;
+			addr = start + size;
+
+			if (mem.State != MEM_COMMIT)
+				continue;
+
+			if (in(start, base, 0x1'0000'0000))
+			{
+				guest_base += size;
+				continue;
+			}
+
+			total += size;
+
+			if (in(start, sudo, 0x1'0000'0000))
+				guest += size;
+			else if (in(start, exec, 0x2'0000'0000))
+				exec_table += size;
+			else if (in(start, stat, 0x1'0000'0000))
+				stat_area += size;
+			else if (mem.Type == MEM_IMAGE)
+				image += size;
+			else if (mem.Protect & (PAGE_EXECUTE | PAGE_EXECUTE_READ | PAGE_EXECUTE_READWRITE | PAGE_EXECUTE_WRITECOPY))
+				jit += size;
+			else if (mem.Type == MEM_MAPPED)
+				mapped += size;
+			else
+			{
+				priv += size;
+				priv_by_base[reinterpret_cast<u64>(mem.AllocationBase)] += size;
+				if (size > biggest_priv)
+					biggest_priv = size, biggest_priv_addr = start;
+			}
+		}
+
+		constexpr double mb = 1048576.0;
+		sys_log.notice("UWP memory: committed %.0f MB = guest %.0f (base view %.0f) + PPU exec table %.0f + stat %.0f + JIT code %.0f + other mapped %.0f + private %.0f (largest %.0f at 0x%x) + images %.0f",
+			total / mb, guest / mb, guest_base / mb, exec_table / mb, stat_area / mb, jit / mb, mapped / mb, priv / mb, biggest_priv / mb, biggest_priv_addr, image / mb);
+
+		// Private memory by allocation size (heap segments, D3D12 heaps, big buffers), and the largest ones.
+		static constexpr u64 bucket_limits[] = {0x10'0000, 0x100'0000, 0x400'0000, ~0ull};
+		static constexpr const char* bucket_names[] = {"<1 MB", "1-16 MB", "16-64 MB", ">=64 MB"};
+		u64 bucket_bytes[4]{}, bucket_count[4]{};
+		std::vector<std::pair<u64, u64>> largest;
+		for (const auto& [alloc_base, bytes] : priv_by_base)
+		{
+			u32 b = 0;
+			while (bytes >= bucket_limits[b])
+				b++;
+			bucket_bytes[b] += bytes;
+			bucket_count[b]++;
+			largest.emplace_back(bytes, alloc_base);
+		}
+		std::sort(largest.begin(), largest.end(), std::greater<>());
+		std::string text;
+		for (u32 b = 0; b < 4; b++)
+			fmt::append(text, "%s%s: %u allocs %.0f MB", b ? ", " : "", bucket_names[b], bucket_count[b], bucket_bytes[b] / mb);
+		text += " | largest:";
+		for (usz i = 0; i < std::min<usz>(largest.size(), 8); i++)
+			fmt::append(text, " %.1f MB@0x%x", largest[i].first / mb, largest[i].second);
+		sys_log.notice("UWP private memory: %s", text);
+
+		char heap[1024];
+		uwp_heap_guard_summary(heap, sizeof(heap), 12);
+		sys_log.notice("UWP heap: %s", heap);
+
+		char d3d12[1536];
+		uwp_d3d12_watch_summary(d3d12, sizeof(d3d12));
+		sys_log.notice("UWP D3D12: %s", d3d12);
+	}
+
 	UINT64 get_app_memory_usage(UINT64* limit = nullptr)
 	{
 		UINT64 usage = 0;
@@ -283,6 +380,7 @@ namespace
 		UINT64 limit = 0;
 		const UINT64 usage = get_app_memory_usage(&limit);
 		sys_log.notice("UWP: app memory %.3f GB of %.3f GB (%s)", usage / 1073741824.0, limit / 1073741824.0, when);
+		log_memory_breakdown();
 	}
 
 	// While a game runs: logs app memory every second when it moved by 64 MB or more, else every 10 s.
@@ -428,9 +526,9 @@ namespace
 		g_emu_callbacks.on_missing_fw = []() { sys_log.error("UWP: PS3 firmware is not installed."); };
 		g_emu_callbacks.handle_taskbar_progress = [](s32, s32) {};
 
-		g_emu_callbacks.get_localized_string = [](localized_string_id, const char*) -> std::string { return {}; };
-		g_emu_callbacks.get_localized_u32string = [](localized_string_id, const char*) -> std::u32string { return {}; };
-		g_emu_callbacks.get_localized_setting = [](const cfg::_base*, u32) -> std::string { return {}; };
+		g_emu_callbacks.get_localized_string = uwp_localized_string;
+		g_emu_callbacks.get_localized_u32string = uwp_localized_u32string;
+		g_emu_callbacks.get_localized_setting = uwp_localized_setting;
 		g_emu_callbacks.get_photo_path = [](std::string_view) -> std::string { return {}; };
 		g_emu_callbacks.play_sound = [](const std::string&, std::optional<f32>) {};
 		g_emu_callbacks.get_image_info = [](const std::string&, std::string&, s32&, s32&, s32&) { return false; };
@@ -565,13 +663,11 @@ namespace
 			Emu.SetUsr("00000001");
 			Emu.Init();
 
-			// Vulkan through Mesa's Dozen (D3D12) unless the menu's settings chose Null. An empty
-			// LocalState/null_renderer file forces the null renderer for CPU-only tests.
+			// Always Vulkan through Mesa's Dozen (D3D12). Emu.Init's default renderer is Null, so a fresh
+			// config.yml says Null; it must not be taken as a choice. An empty LocalState/null_renderer
+			// file forces the null renderer for CPU-only tests.
 			const bool use_null = fs::is_file(g_local_dir + "null_renderer");
-			if (use_null)
-				g_cfg.video.renderer.set(video_renderer::null);
-			else if (g_cfg.video.renderer != video_renderer::null)
-				g_cfg.video.renderer.set(video_renderer::vulkan);
+			g_cfg.video.renderer.set(use_null ? video_renderer::null : video_renderer::vulkan);
 			sys_log.always()("UWP: renderer: %s", g_cfg.video.renderer.get());
 			// XAudio2 sound; an empty LocalState/null_audio file turns it off.
 			const bool null_audio = fs::is_file(g_local_dir + "null_audio");
@@ -611,6 +707,35 @@ namespace
 			// with no fps gain; Relaxed ZCULL Sync breaks RSX pipelines on Dozen.
 			g_cfg.video.shadermode.set(shader_mode::async_recompiler);
 			g_cfg.video.relaxed_zcull_sync.set(false);
+			// Dozen reports 4 GB of video memory, but on the Xbox it comes out of the app's 5 GB, so
+			// the texture and surface caches only start evicting long after the app is out of memory
+			// (Watch Dogs). Cap it; LocalState/vram_limit holds another size in MB (256-65536).
+			{
+				u32 vram_mb = 1536;
+				if (fs::file f{g_local_dir + "vram_limit"})
+				{
+					const std::string text = f.to_string();
+					const u32 v = static_cast<u32>(std::strtoul(text.c_str(), nullptr, 10));
+					if (v >= 256 && v <= 65536)
+						vram_mb = v;
+				}
+				g_cfg.video.vk.vram_allocation_limit.set(vram_mb);
+				sys_log.always()("UWP: VRAM allocation limit: %u MB", vram_mb);
+			}
+			// Largest descriptor subpool per shader program (RPCS3 default 4096 sets); test switch.
+			if (fs::file f{g_local_dir + "desc_pool_max"})
+			{
+				const u32 v = static_cast<u32>(std::strtoul(f.to_string().c_str(), nullptr, 10));
+				if (v >= 16 && v <= 4096)
+					g_uwp_desc_pool_max = v;
+				sys_log.always()("UWP: descriptor pool max sets: %u", g_uwp_desc_pool_max);
+			}
+			// Live graphics pipelines kept before idle ones are evicted (0 = keep all, as upstream).
+			if (fs::file f{g_local_dir + "pipeline_limit"})
+			{
+				g_uwp_pipeline_limit = static_cast<u32>(std::strtoul(f.to_string().c_str(), nullptr, 10));
+			}
+			sys_log.always()("UWP: pipeline limit: %u", g_uwp_pipeline_limit);
 			// PS3 networking: RPCS3 ships with the network "Disconnected"; turn it on once so the XMB
 			// and games see an internet connection (the menu's Network setting can switch it off again,
 			// which then sticks). PSN stays off; RPCN needs an account.
