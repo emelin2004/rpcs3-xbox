@@ -171,6 +171,12 @@ namespace vk
 		allocatorInfo.device = dev;
 		allocatorInfo.instance = inst;
 		allocatorInfo.vulkanApiVersion = VK_API_VERSION_1_2;
+#ifdef RPCS3_UWP
+		// Video memory is the app's RAM on the Xbox. VMA's 256 MB blocks stayed a third empty
+		// (Portal 2: 992 MB of blocks for 642 MB used) and an empty one is only returned whole:
+		// 64 MB blocks keep that slack smaller. Allocations over 32 MB get their own memory.
+		allocatorInfo.preferredLargeHeapBlockSize = 64 * 0x100000;
+#endif
 
 		std::vector<VkDeviceSize> heap_limits;
 		const auto vram_allocation_limit = g_cfg.video.vk.vram_allocation_limit * 0x100000ull;

@@ -130,7 +130,10 @@ Empty files in the app's `LocalState` folder (via Device Portal file explorer):
 - `autopress`: scripted button presses for remote test runs.
 - `storage`: `local` or a folder path for the cache location.
 - `precompile`, `background_compile`: turn LLVM precompilation / background PRX compile back on.
-- `no_network`, `null_audio`, `null_renderer`, `heap_guard`, `ext_host_mem`: debugging switches.
+- `no_network`, `null_audio`, `null_renderer`, `ext_host_mem`: debugging switches.
+- `heap_guard`: full operator new guard (header and canary on every block, checked on delete,
+  report in `heap_guard.log`). Off by default: it costs ~80 bytes per block, ~230 MB in Portal 2.
+- `vram_limit`: Vulkan video memory cap in MB (default 1536; it comes out of the app's 5 GB).
 - `compile_headroom`, `compile_job_mb`: a new PPU/SPU compile job starts only while
   headroom + job_mb per running job is left of the app's memory (defaults 1280 and 128 MB).
 - `default_timer`: don't raise the system timer resolution (the app raises it to the finest the

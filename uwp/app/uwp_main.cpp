@@ -403,6 +403,17 @@ namespace
 			f.write(fmt::format("%.1f s: app memory %.3f GB of %.3f GB (%s)\n", get_system_time() / 1'000'000., usage / 1073741824.0, limit / 1073741824.0, when));
 	}
 
+	// After a game stops: hand the heap's free pages back. A session leaves hundreds of MB of freed
+	// but still committed heap behind (PPU/SPU compiles, shader and pipeline builds), which the next
+	// game would otherwise start with (Minecraft then Portal 2: 0.5 GB more private memory after the stop).
+	void compact_heap()
+	{
+		const u64 start = get_system_time();
+		const SIZE_T largest = ::HeapCompact(::GetProcessHeap(), 0);
+		sys_log.notice("UWP: heap compacted in %.1f ms, largest free block %u KB", (get_system_time() - start) / 1000., largest >> 10);
+		log_app_memory("end, heap compacted");
+	}
+
 	// While a game runs: logs app memory every second when it moved by 64 MB or more, else every 10 s.
 	// The console ends an app silently when it goes over its limit, so the log keeps the trend.
 	bool g_mem_watch = true; // an empty LocalState/no_mem_watch turns the poll off
@@ -641,6 +652,9 @@ namespace
 				if (wsa_res != 0)
 					OutputDebugStringA("UWP: WSAStartup failed\n");
 			}
+			// The full heap guard (canaries, 80 bytes per operator new block) is only on with an
+			// empty LocalState/heap_guard file; by default blocks carry a 16-byte header.
+			if (fs::is_file(g_local_dir + "heap_guard"))
 			{
 				const std::string guard_log = g_local_dir + "heap_guard.log";
 				std::wstring wpath(guard_log.size() + 1, L'\0');
@@ -996,10 +1010,12 @@ namespace
 					watch_app_memory(ticks);
 					start_background_precompile(ticks);
 					report_stall(ticks);
+					logged_end = false;
 				}
 				else if (!logged_end && Emu.IsStopped(true))
 				{
 					log_app_memory("end");
+					compact_heap();
 					logged_end = true;
 				}
 			}

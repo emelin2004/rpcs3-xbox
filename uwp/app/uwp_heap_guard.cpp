@@ -3,11 +3,17 @@
 // header and a trailing canary; operator delete checks both and, if either was overwritten,
 // writes the details and a stack (exe-relative offsets) to LocalState/heap_guard.log, then
 // fails fast so a crash dump is taken at the culprit's free instead of somewhere later.
+//
+// That costs 80 bytes per block (header, alignment slack and canary), ~230 MB for the ~3 million
+// live blocks of a Portal 2 session. By default blocks get a 16-byte header instead (size and
+// caller for the memory logs, a tag that still catches double and mismatched deletes); the full
+// guard is back with an empty LocalState/heap_guard file (uwp_heap_guard_open_log).
 
 #include <windows.h>
 #include <cstdlib>
 #include <cstring>
 #include <cstdio>
+#include <cstddef>
 #include <cstdint>
 #include <new>
 #include <atomic>
@@ -33,6 +39,23 @@ namespace
 	};
 	static_assert(sizeof(header) == 48);
 
+	// Default header: malloc's 16-byte alignment is kept, the caller is stored exe-relative.
+	struct alignas(16) compact_header
+	{
+		std::uint32_t size;
+		std::uint32_t caller_rva;
+		std::uint64_t tag;
+	};
+	static_assert(sizeof(compact_header) == 16);
+	constexpr std::uint64_t c_tag_live = 0x4b4f50434d4e5557ull; // "WNMCPOK"
+	constexpr std::uint64_t c_tag_dead = 0x44504344474e5557ull;
+
+	// Both headers end with a u64 right before the user data: header::magic_inv or compact_header::tag.
+	static_assert(offsetof(header, magic_inv) + 8 == sizeof(header));
+	static_assert(offsetof(compact_header, tag) + 8 == sizeof(compact_header));
+
+	std::atomic<bool> s_full_guard{false};
+
 	HANDLE s_log = INVALID_HANDLE_VALUE;
 
 	void write_log(const char* text)
@@ -49,6 +72,18 @@ namespace
 	std::uintptr_t rva(const void* p)
 	{
 		return reinterpret_cast<std::uintptr_t>(p) - reinterpret_cast<std::uintptr_t>(&__ImageBase);
+	}
+
+	[[noreturn]] void report_stack(char (&buf)[2048], int n)
+	{
+		n += std::snprintf(buf + n, sizeof(buf) - n, "\n  stack:");
+		void* frames[32];
+		const USHORT count = RtlCaptureStackBackTrace(0, 32, frames, nullptr);
+		for (USHORT i = 0; i < count && n < 2000; i++)
+			n += std::snprintf(buf + n, sizeof(buf) - n, " %llx", static_cast<unsigned long long>(rva(frames[i])));
+		std::snprintf(buf + n, sizeof(buf) - n, "\n");
+		write_log(buf);
+		__fastfail(50); // FAST_FAIL_HEAP_METADATA_CORRUPTION
 	}
 
 	[[noreturn]] void report(const char* what, header* h, void* user)
@@ -70,14 +105,18 @@ namespace
 			for (int i = -16; i < 48 && n < 1900; i++)
 				n += std::snprintf(buf + n, sizeof(buf) - n, " %02x", t[i]);
 		}
-		n += std::snprintf(buf + n, sizeof(buf) - n, "\n  stack:");
-		void* frames[32];
-		const USHORT count = RtlCaptureStackBackTrace(0, 32, frames, nullptr);
-		for (USHORT i = 0; i < count && n < 2000; i++)
-			n += std::snprintf(buf + n, sizeof(buf) - n, " %llx", static_cast<unsigned long long>(rva(frames[i])));
-		std::snprintf(buf + n, sizeof(buf) - n, "\n");
-		write_log(buf);
-		__fastfail(50); // FAST_FAIL_HEAP_METADATA_CORRUPTION
+		report_stack(buf, n);
+	}
+
+	[[noreturn]] void report_compact(const char* what, compact_header* h, void* user)
+	{
+		char buf[2048];
+		int n = std::snprintf(buf, sizeof(buf), "heap guard: %s: block %p (user %p), size 0x%x, allocated from exe+0x%x, freed from exe+0x%llx\n  head:",
+			what, static_cast<void*>(h), user, h->size, h->caller_rva, static_cast<unsigned long long>(rva(__builtin_return_address(0))));
+		const auto* b = reinterpret_cast<const unsigned char*>(h);
+		for (int i = 0; i < 48; i++)
+			n += std::snprintf(buf + n, sizeof(buf) - n, " %02x", b[i]);
+		report_stack(buf, n);
 	}
 
 	// Live operator new bytes per caller (open addressing, never removed), for memory logs.
@@ -121,6 +160,19 @@ namespace
 
 	void* guarded_alloc(std::size_t size, std::size_t align, void* caller)
 	{
+		const std::uintptr_t caller_rva = rva(caller);
+		if (align == 0 && !s_full_guard.load(std::memory_order_relaxed) && size <= 0xffff'ffffu && caller_rva <= 0xffff'ffffu)
+		{
+			auto* h = static_cast<compact_header*>(std::malloc(sizeof(compact_header) + size));
+			if (!h)
+				return nullptr;
+			h->size = static_cast<std::uint32_t>(size);
+			h->caller_rva = static_cast<std::uint32_t>(caller_rva);
+			h->tag = c_tag_live;
+			account(caller, static_cast<std::int64_t>(size), 1);
+			return h + 1;
+		}
+
 		const std::size_t a = align > 16 ? align : 16;
 		void* raw = std::malloc(sizeof(header) + a + size + c_tail);
 		if (!raw)
@@ -144,6 +196,19 @@ namespace
 	{
 		if (!p)
 			return;
+		const std::uint64_t tag = static_cast<const std::uint64_t*>(p)[-1];
+		if (tag == c_tag_live || tag == c_tag_dead)
+		{
+			auto* c = static_cast<compact_header*>(p) - 1;
+			if (tag == c_tag_dead)
+				report_compact("double delete", c, p);
+			if (aligned)
+				report_compact("plain new freed by aligned delete", c, p);
+			c->tag = c_tag_dead;
+			account(reinterpret_cast<unsigned char*>(&__ImageBase) + c->caller_rva, -static_cast<std::int64_t>(c->size), -1);
+			std::free(c);
+			return;
+		}
 		auto* h = static_cast<header*>(p) - 1;
 		if (h->magic == c_magic_dead && h->magic_inv == ~c_magic_dead)
 			report("double delete", h, p);
@@ -203,8 +268,10 @@ extern "C" void uwp_heap_guard_summary(char* buf, std::size_t size, unsigned top
 			static_cast<long long>(best[i].bytes >> 20), static_cast<long long>(best[i].count));
 }
 
+// Turns the full guard on for blocks allocated from now on (LocalState/heap_guard).
 extern "C" void uwp_heap_guard_open_log(const wchar_t* path)
 {
+	s_full_guard = true;
 	s_log = CreateFile2(path, GENERIC_WRITE, FILE_SHARE_READ, CREATE_ALWAYS, nullptr);
 }
 

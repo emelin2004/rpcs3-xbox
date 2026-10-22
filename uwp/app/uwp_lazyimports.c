@@ -51,6 +51,7 @@ static u64 lazy_ret_cmdline(void) { return (u64)lazy_empty_cmdline; }
 	X(K32, GetSystemTime, lazy_ret_0) \
 	X(K32, GetThreadGroupAffinity, lazy_ret_0) \
 	X(K32, GetVolumePathNameW, lazy_ret_0) \
+	X(K32, HeapCompact, lazy_ret_0) \
 	X(K32, K32EnumProcessModulesEx, lazy_ret_0) \
 	X(K32, K32GetProcessMemoryInfo, lazy_ret_0) \
 	X(K32, LoadLibraryExA, lazy_ret_0) \
