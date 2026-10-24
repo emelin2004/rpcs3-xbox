@@ -35,6 +35,8 @@ Versions in use: .77 ×4, .76 ×2, .73 ×2.
 | Minecraft BLUS31426 | 89 stutters in 7.5 min, nearly all "Game sync wait" at 75–125 ms. main_thread 60–80%, SPU about 30%. | First run on this install: `SPU Runtime ... from 0 cached functions`. 350–800 SPU functions built per minute while it played; new SPU code runs in the interpreter until built. Minecraft BLES01976 on an install with a cache: 4.4 stutters/min. | None needed if later runs are smooth. Check the next BLUS31426 session. | Medium |
 | Snake Ball, 50 Cent, SAW 2 | Hitches overlap the 10 s memory poll 3–9× more often than chance (Snake Ball 7 of 28), but it's a small share overall | The poll walks the whole address space with VirtualQuery (up to 34 ms). | Not changed. Worth an A/B with `LocalState/no_mem_watch`. | Low |
 
+| XMB (`72b5b9c3`, new install, .76) | Freezes of 4.2–8.9 s while browsing (`Frame gap of 7.809 s`, `8.924 s`, `6.240 s`, `4.205 s`). `ScePafJob` at 91–99%, 0 draws | First-use PPU LLVM compiles of XMB modules (`vmclib.sprx`, `x3_mdimp4/5/8.sprx`, `np_trophy_util.sprx`...; 69 `LLVM: Compiling module` lines in 5 min). This is the expected cost of keeping LLVM precompilation off (it took 36+ minutes on first boot). They're cached afterwards. | None. The "Compiling PPU code" overlay is meant to show after 1.5 s; worth a look on the console to check it really appears over the XMB. | High |
+
 The timer resolution is already raised to 1 ms in every log (`UWP: timer resolution 1.00 ms`), so it is not the cause.
 
 ### Notes (not bugs yet)
@@ -47,3 +49,5 @@ The timer resolution is already raised to 1 ms in every log (`UWP: timer resolut
 - After a new build: check whether #41 brings in heap guard logs for the silent ends, and whether #39 shows why 50 Cent loses its GPU device.
 - Portal 2 long frames: find what the game thread waits on (PPU thread sampling would help).
 - Each Portal 2 frame logs `NV3089_IMAGE_IN: Operation writes memory onto itself ... Will ignore` (about 30 lines/s). Harmless, but it fills the live log.
+
+- Installs `db91d4cb` and `86f9116c` only opened the app without firmware (0 launches, no errors). Only the app_start log is sent, so a failed firmware install would not show. Maybe log or report firmware install results.
