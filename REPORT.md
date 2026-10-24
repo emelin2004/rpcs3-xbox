@@ -38,7 +38,17 @@ Versions in use: .77 ×4, .76 ×2, .73 ×2.
 
 The timer resolution is already raised to 1 ms in every log (`UWP: timer resolution 1.00 ms`), so it is not the cause.
 
+## Pass 2: 2026-10-24, 23:40–00:00 UTC
+
+| What | Installs / reports | Cause | Fix | Confidence |
+|------|--------------------|-------|-----|------------|
+| 50 Cent BLUS30256 VRAM-OOM again (23:43, .77) | `03552d8b`, 1 | GPU device lost **right after a 55 s gap with no log line at all** (process frozen = Xbox suspend). Also seen in log `5186ff71` (37 s gap). 2 of the 3 50 Cent device losses come straight after a suspend; the third (`498504dc`) didn't. The port doesn't pause or log on suspend. | [emelin2004/rpcs3-xbox#44](https://github.com/emelin2004/rpcs3-xbox/pull/44): pause the game on Suspending, resume on Resuming, log both. Port-wide. If the device is still lost, #39's reason line shows the next step. | Medium (cause), low-medium (that pausing is enough) |
+| 50 Cent log flood: `Inserting headset [0..7]` + `cellMicOpenEx` → `DEVICE_NOT_FOUND`, every frame | `03552d8b` | `cellMicIsAttached` was a stub that always returned 1, so with no microphone (Null) the game sees 8 headsets and keeps opening them. 186k of 678k lines in one log; it's why the logs reach 20–88 MB and get cut. | [emelin2004/rpcs3-xbox#43](https://github.com/emelin2004/rpcs3-xbox/pull/43): attached only when a device is registered. Port-wide code, seen in one game. | Medium-high |
+| 50 Cent silent end at 23:44, 8 s after boot | `03552d8b`, 1 | The user had just switched **Shader mode to "Shader Interpreter only"** in Settings (13 s before booting), apparently to work around the crash above. The run sat in the interpreter preload (memory +100 MB/s, frame gaps of 0.4–0.7 s), then the log ends. | Covered by #40 (no interpreter modes) | Medium |
+| patch.yml false alarm | `03552d8b`, 3 more | Same as pass 1 #1 | #38 | High |
+
 ### Notes (not bugs yet)
+- 50 Cent menu or loading frames: 1 draw and 836 FIFO commands, but 80–115 ms of GPU time (present wait). Probably a movie or texture-conversion path that is slow on Dozen. Menus only, low priority.
 - XMB sessions show 230–760 fps averages on the Performance page, with VSync off and frame limit Auto. Worth checking whether the XMB really runs unlimited, which would waste GPU time and power, or whether the server's average is off.
 - GTA V now averages about 25 fps (SPU-bound, 95%), better than the ~10 fps in the notes.
 - 50 Cent: stutters are "Present 45%" (the console's present/copy path).
