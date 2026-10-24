@@ -25,6 +25,18 @@ Versions in use: .77 ×4, .76 ×2, .73 ×2.
 | 11 | PKGi: `VK_ERROR_INITIALIZATION_FAILED` in `memory.cpp:280` | `ed2472f5`, 1 report | .73 | Old build, one report. | — | — |
 | 12 | `reason=true` crash reports | `f3c163e1`, `ed2472f5` | .73/.75 | Builds before .76 sent text values as `true` (fixed in #36). These are mostly the known fake crashes from closing via Xbox Home or updating. | — | High |
 
+### Hiccups (stutters)
+
+| Game | What the logs show | Cause | Fix | Confidence |
+|------|-------------------|-------|-----|------------|
+| All games (panel) | "Present" stutters: 50 Cent's long frames are 140–188 ms with `present wait` 106–148 ms, `present copy` ~1.5 ms, RSX `GPU wait` 0 | The app's `present_ms` is the wait on the **previous frame's GPU fence** (`swapchain_uwp.hpp`), so this is GPU time, not presenting. The server classed it wrong. | [emelin2004/rpcs3-xbox-telemetry#6](https://github.com/emelin2004/rpcs3-xbox-telemetry/pull/6) (server only) | High |
+| All games (panel) | "Shader compile" stutters: SAW 2 shows 51%, but its "1 new pipeline" frames had RSX idle for 81–117 of 91–131 ms | Pipelines build asynchronously. One finishing in a frame was counted as the cause even when RSX was just waiting for the game. | [emelin2004/rpcs3-xbox-telemetry#7](https://github.com/emelin2004/rpcs3-xbox-telemetry/pull/7) (server only) | High |
+| Portal 2 | 178 hitches in 4.5 min (.77, Async Recompiler), 174 of them with RSX idle. About one 50 ms frame per second, plus a 110–150 ms frame every 2–6 s. `main_thread` at 96–100%, 28–29 fps against a 30 fps target. No link to the port's memory poll, cache saves or perf reports. | (a) PPU-bound frames just missing the 33 ms deadline wait for the next vblank (50 ms), which looks like judder. (b) The long frames: about 105 ms with no RSX command from the game. Thread oversubscription is a guess (main_thread 100%, 6 SPU threads at 50–86%, RSX 50%, plus compiler threads, on the console's CPU share); not proven. | None yet. Ideas to test on the console: higher priority for the PPU main thread; fewer SPU threads (Max SPURS Threads 3). | Medium for (a), low for (b) |
+| Minecraft BLUS31426 | 89 stutters in 7.5 min, nearly all "Game sync wait" at 75–125 ms. main_thread 60–80%, SPU about 30%. | First run on this install: `SPU Runtime ... from 0 cached functions`. 350–800 SPU functions built per minute while it played; new SPU code runs in the interpreter until built. Minecraft BLES01976 on an install with a cache: 4.4 stutters/min. | None needed if later runs are smooth. Check the next BLUS31426 session. | Medium |
+| Snake Ball, 50 Cent, SAW 2 | Hitches overlap the 10 s memory poll 3–9× more often than chance (Snake Ball 7 of 28), but it's a small share overall | The poll walks the whole address space with VirtualQuery (up to 34 ms). | Not changed. Worth an A/B with `LocalState/no_mem_watch`. | Low |
+
+The timer resolution is already raised to 1 ms in every log (`UWP: timer resolution 1.00 ms`), so it is not the cause.
+
 ### Notes (not bugs yet)
 - XMB sessions show 230–760 fps averages on the Performance page, with VSync off and frame limit Auto. Worth checking whether the XMB really runs unlimited, which would waste GPU time and power, or whether the server's average is off.
 - GTA V now averages about 25 fps (SPU-bound, 95%), better than the ~10 fps in the notes.
@@ -33,4 +45,5 @@ Versions in use: .77 ×4, .76 ×2, .73 ×2.
 
 ### Next
 - After a new build: check whether #41 brings in heap guard logs for the silent ends, and whether #39 shows why 50 Cent loses its GPU device.
-- Look at hiccups (stutter breakdowns) per game.
+- Portal 2 long frames: find what the game thread waits on (PPU thread sampling would help).
+- Each Portal 2 frame logs `NV3089_IMAGE_IN: Operation writes memory onto itself ... Will ignore` (about 30 lines/s). Harmless, but it fills the live log.
