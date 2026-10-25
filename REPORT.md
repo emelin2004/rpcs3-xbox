@@ -183,3 +183,29 @@ Quiet (no crashes since 03:24). One new session:
 - Install `03552d8b` now has `rpcs3/patches/imported_patch.yml` in a format RPCS3 doesn't read: about 25 `PAT: Error: Skipping Patch key ... expected Map, found Sequence` lines per boot, for MK vs DC, Minecraft, Wolverine, GTA IV and Max Payne 3. That's an error, not a fatal, so it doesn't stop the boot, but none of those patches apply. RPCS3's patch files need `PPU-<hash>:` keys under the game title; a list keyed by serial is skipped.
 - No new perf data beyond pass 13 (one 1-minute Minecraft session).
 
+## Pass 15: 2026-10-25, 09:58–10:20 UTC (first 0.1.34.78 data)
+
+0.1.34.78 (#38–#49, via #50) was released at 08:55. Two installs are on it so far:
+- `8c902e96` (Series X, updated from .77): 1 Minecraft session (9.7 min) and 2 XMB sessions, then 1 silent end.
+- `dac7dad0` (Series S, new): 1 app start without firmware.
+
+### 0.1.34.78 fix status
+
+| PR | Status | Evidence |
+|----|--------|----------|
+| #45 cache saver at stop | **Works** | `UWP: stopping the pipeline cache saver (waiting for 15041 ms)`. The Minecraft stop took 6.3 s, the XMB stop 3 s. No Stop Watchdog. |
+| #42 slow stop | Not hit | No stop over 10 s. |
+| #44 pause on suspend | **Works** | `Emulation is being paused...` and then `UWP: suspending (game paused)` 5 ms later. |
+| #41 heap guard log | Not hit | The silent end didn't upload a heap guard log, so either the log was empty or the app was closed from Xbox Home (see below). |
+| #48 mesa/memory logs with a fatal | Not hit | No fatal on .78 yet. |
+| #39 GPU device lost | Not hit | No device loss. |
+| #46 RSX semaphore sleep | No change for Minecraft | Minecraft BLUS31426 on a Series X: median 49.9 fps, RSX 82% busy (vertex upload ~4.9 ms/frame). It's still RSX-bound, the same pattern as on .77, so #46 neither helped nor hurt there. GTA V, Wolverine and Portal 2 haven't run on .78 yet. |
+| #49 double boot | Not hit | No `UI: not booting`, no `System.cpp:1099`. |
+| #38, #40, #43, #47 | Not hit | No patch, interpreter, 50 Cent or spurs_test runs. |
+| New errors from .78 | None seen | The `·E` lines in the 16.6 MB log are the usual noise (sys_fs ENOENT, Dozen SPIR-V warnings, XMB metadata db). |
+
+### Silent end at the XMB was really a close while suspended
+| What | Installs / reports | Findings | Fix / next step | Confidence |
+|------|--------------------|----------|-----------------|------------|
+| XMB `ended_during_game` (09:54) | `8c902e96`, 1 | The log and the memory log both stop right after `UWP: suspending (game paused)`, and the app started again 13 s later. It should have been reported as `game_exit` / `app_closed`, but the `suspended` mark wasn't in `telemetry_session`. **No install has ever reported `app_closed`** (15 installs checked; there's 1 `app_updated`). So the suspend mark probably never works, and part of the `ended_during_game` group is really "closed from Xbox Home". The code paths look right, so I can't tell from here whether `on_suspend` didn't write, or the app resumed briefly (which clears the mark) and then died before the log was flushed. | [#52](https://github.com/emelin2004/rpcs3-xbox/pull/52): log what `on_suspend`, `on_resume` and `report_previous_run` did, write the mark with a flush, and sync RPCS3.log at suspend. A diagnostic, not a fix. | High that the mark is missing; cause unknown |
+
