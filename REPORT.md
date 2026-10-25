@@ -148,6 +148,13 @@ Quiet (no crashes since 03:24). One new session:
 | GTA IV BLUS30127: boot fails, `EBOOT.BIN` "Invalid or unsupported file format" | `03552d8b` | Bad or undecryptable copy in `dev_hdd0/game`. The menu says "Couldn't start the game: Invalid file or folder". Not a port bug. | — | High |
 | Minecraft BLUS31426: silent end while loading 83 cached PPU modules (06:54), and at 06:24 | `03552d8b`, 2 | 1.3 GB, no error, the log stops mid-load | (#41) | — |
 
+## Pass 13: 2026-10-25, 07:41–07:55 UTC
+
+| What | Installs / reports | Findings | Fix / next step | Confidence |
+|------|--------------------|----------|-----------------|------------|
+| **Mortal Kombat vs. DC Universe** BLUS30246: `Access violation reading location 0x1a080c84 (unmapped memory)` in PPU `main_thread` at `0x004cedb8` (07:26, 07:35) | `03552d8b`, 2 (identical) | Deterministic: same instruction, same address, about 10 min in (`r10 = 0x1a080c83`, a pointer the game computed). No allocation in the log covers it (all near 0x10000000 or above 0x30000000), so it isn't memory the port's lazy commit missed. Looks like a game-side wrong pointer, i.e. an emulation-accuracy issue (upstream territory, e.g. a missing patch or setting for this game). | No port fix. Worth checking RPCS3's wiki/compatibility entry and patches for BLUS30246, and trying `SPU loop detection` / `Accurate xfloat` in a custom config. | Medium |
+| LittleBigPlanet `VK_ERROR_OUT_OF_HOST_MEMORY` at `dzn_cmd_buffer.c:1179` again (07:02) | `abb26e7c`, now 2 | Same `ID3D12GraphicsCommandList::Close` failure after about 6 min, so it reproduces. The `mesa.log` uploaded at 07:05 belongs to a different run (ended at 2:39) and has no `Close failed` line, which confirms the gap #48 closes. | #48 | High (repro) |
+
 ### Notes (not bugs yet)
 - Portal 2 compiles ~1,700 D3D12 PSOs at ~500 ms each in **every** session (`MESA: dzn: PSOs: 0 from the library, 1728 compiled (avg 494.5 ms)`), even with the Vulkan pipeline cache. That cache keeps SPIR-V→DXIL but not the D3D12 PSO compile, because the PSO library stays off. It's the main "shader compile" cost there.
 - 50 Cent menu or loading frames: 1 draw and 836 FIFO commands, but 80–115 ms of GPU time (present wait). Probably a movie or texture-conversion path that is slow on Dozen. Menus only, low priority.
