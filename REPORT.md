@@ -5,7 +5,7 @@ Nothing here is merged; every PR needs a console test first.
 
 ## Morning summary: what to test, in this order
 
-None of the app PRs were built in the cloud session (no UWP toolchain there); each has a console check in its description. All are branched from main (0.1.34.77) and are independent; a test build with several of them needs a version of .78 or higher.
+None of the app PRs were built in the cloud session (no UWP toolchain there); each has a console check in its description. All are branched from main (0.1.34.77) and independent, and all ten merge together without conflicts (checked: 11 files, +180/−15); a test build with several of them needs a version of .78 or higher.
 
 | # | PR | What it should show on the console | Why first |
 |---|----|------------------------------------|-----------|
