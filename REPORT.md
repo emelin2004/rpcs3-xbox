@@ -230,3 +230,33 @@ On .78, `8c902e96` is now at 6 app starts and 5 launches, with 2 new fatal error
 | **MK Komplete Edition** `VK_ERROR_OUT_OF_HOST_MEMORY` in `command_buffer::end()` (10:26) | `8c902e96`, 1 | It isn't memory: app memory was 2.8 of 5 GB. Dozen logs `Close failed: 0x80070057` (E_INVALIDARG). That command list had more than 4096 D3D12 calls (the trace ring is full), and 301 of the last 400 are `CopyTextureRegion`. That's the same signature as LittleBigPlanet's `dzn_cmd_buffer.c:1179` failure on .77. Some recorded call is invalid, most likely a copy. | [#55](https://github.com/emelin2004/rpcs3-xbox/pull/55), opened in another session, skips empty image copies and adds `LocalState/dzn_probe`. With the probe on, the next repro names the call that breaks the list. | Medium (cause class), high (not a memory problem) |
 | **MK Komplete Edition** SPU `[0x3dd34] Invalid code` → `Compilation failed` (10:28) | `8c902e96`, 1 | `MwyCellSpursKernel3` jumped to code that doesn't decode, 2 min in. That's an SPU emulation issue: a wrong jump or corrupted local store, not the port. | Game-specific. Try the SPU settings for BLUS30902 (SPU loop detection off, Accurate DMA) once more runs show whether it repeats. | Medium |
 
+## Pass 17: 2026-10-25, 11:58–12:25 UTC (first 0.1.35.0 data)
+
+Installs on the new versions:
+
+| Install | Device | Version | App starts / launches | New since pass 16 |
+|---------|--------|---------|-----------------------|-------------------|
+| `8c902e96` | Series X | .78 | 9 / 9 | Dragon Ball: Raging Blast 2 (fatal), MK Komplete Edition (silent end), Minecraft |
+| `61d1a216` | Series X | 0.1.35.0, new | 3 / 2 | DRIVER San Francisco twice (1 fatal, 1 silent end), Conker |
+| `ed2472f5` | Series X | 0.1.35.0, was on .77 | | Portal 2 (silent end), GTA V |
+| `68d59293` | Series S | 0.1.35.0, new | | App start without firmware |
+
+### Fix status (.78 and 0.1.35.0)
+| PR | Status | Evidence |
+|----|--------|----------|
+| #39 GPU device lost | **Works** | DRIVER SF, 17:36 in: `UWP: the GPU device was lost (device removed, 0x887a0005)` is the first fatal, logged once, with no Present flood. The reason Windows reports is only "device removed", not hung/reset/driver error, so it doesn't say why. Memory was 3.4 of 5 GB and VRAM 642 of 1228 MB, with no suspend before it, so this looks like a GPU hang. |
+| #48 Dozen + memory logs | Works | Again with every fatal. |
+| #45 cache saver at stop | Works, one hang | DRIVER SF and MK stopped in under 5 s. Portal 2 on 0.1.35.0: `stopping the pipeline cache saver (writing the file for 173304 ms)`, i.e. the write itself hung and the stop never finished. Another session's [#54](https://github.com/emelin2004/rpcs3-xbox/pull/54) handles that case. |
+| #44 pause on suspend | Works | `suspending (game paused)` in DRIVER SF and MK; `suspending (nothing to pause)` in Portal 2, whose stop was still hanging. |
+| #41 heap guard log | Not hit | All 3 new silent ends were closes while suspended, so there was nothing for the heap guard to report. |
+| #46 RSX semaphore sleep | No regression | GTA V on 0.1.35.0: 23 fps median, SPU-bound (busiest SPU 82%), about the same as .77. Portal 2 on 0.1.35.0: 23 fps median, PPU main 63%, a bit under .77's 27.8 average (only 26 reports). |
+| 0.1.35.0 core update | No regression found | No new error types: the `runtimeDescriptorArray`, `lock sudo memory` and `too sleepy` lines were all in .77 logs. DRIVER San Francisco BLUS30536 runs at **60 fps** (median 59.9 over 97 reports). |
+
+### Crashes and silent ends
+| What | Installs / reports | Findings | Fix / next step | Confidence |
+|------|--------------------|----------|-----------------|------------|
+| **Every close while suspended is reported as a crash** | `8c902e96` (XMB, MK KE), `61d1a216` (DRIVER SF), `ed2472f5` (Portal 2): 4 of 4 | Root cause found: `on_suspend` appends `std::string_view{"suspended\n"}`. `fs::file::write()` has no string_view overload, so the "write POD" overload writes the view's 16 raw bytes (pointer and length), not the text. `report_previous_run` never finds the line. This is the explanation for the many `ended_during_game` silent ends all night. | [#52](https://github.com/emelin2004/rpcs3-xbox/pull/52), updated: write a `std::string`, and keep the new suspend/resume log lines. | High |
+| **Sampler crash after an RSX fatal**, again | DRIVER SF (0.1.35.0), DB:RB2 (.78): now 5 of 5 RSX fatals | Same `0xC0000005` from the `UWP RSX sampled` thread 30–70 ms after the RSX thread dies. Still present on the 0.1.35.0 core. | [#56](https://github.com/emelin2004/rpcs3-xbox/pull/56) | High |
+| **Dragon Ball: Raging Blast 2** BLUS30581: `on_vram_exhausted` check at `VKGSRender.cpp:1096` (`Not enough memory resources`) | `8c902e96`, 1 | VRAM grew from 512 to 1419 MB in 0.5 s, about 900 MB, all memory type 2 in the undefined pool, while app memory was only 2.0 of 5 GB. It went past the 1228 MB budget inside a section where RPCS3 can't evict, so the check failed. This is the same failure as Wolverine on .77. Something allocates ~130 MB per 70 ms at a scene change; the log doesn't show what. | Not fixed. Needs a log of the allocations of that memory type during the burst, or a test with `LocalState/vram_limit` raised. Game-specific trigger, port-wide limit. | Medium |
+| DRIVER San Francisco GPU device lost | `61d1a216`, 1 | See #39 above. | Watch for repeats. If it happens again, try `LocalState/d3d12_debug` for the D3D12 reason. | Low |
+
