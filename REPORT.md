@@ -58,6 +58,14 @@ The timer resolution is already raised to 1 ms in every log (`UWP: timer resolut
 | PS Home silent ends (23:55, 23:59) | `3735122c`, 2 | No error, no device loss, no RPCN login nearby. The log just stops. (The `sys_rsx_context_attribute 0x101` calls near the end are per-frame vsync setup, 3,929 in one run, so not a trigger.) | #41 (heap-guard log) should show whether the heap guard ended them | — |
 | Minecraft BLES01976 (.77, 23:56) | `ed2472f5` | 56.7 fps, 4.5 stutters/min, same as before (RSX at the 60 fps limit) | A/B configs in the hiccups table | — |
 
+## Pass 4: 2026-10-25, 00:43–01:00 UTC
+
+| What | Installs / reports | Findings | Fix / next step | Confidence |
+|------|--------------------|----------|-----------------|------------|
+| **New install `39717ffa`** (.77, Series S): first XMB run at 2.2 fps, then `ended_during_game` after 9 min | 1 | The 2.2 fps is the first-boot PPU compile of the system menu (176 `LLVM: Compiling module`), as expected. Then the XMB itself asked to restart (`sysconf_plugin` → `sys_sm_shutdown(op=0x200)` "reboot request", typical after first-time settings) → `lv2_exitspawn` → stop. **The app died during that stop** (join waiting on `Network Thread`), so the XMB never came back. For a new user, the app just closes after setup. | Same cluster as below | High that it died in the stop |
+| **Deaths during an emulator stop** (cluster) | 7 runs, 4 installs: Portal 2 ×3 (.77) + 1 (.73), F1 (.73), GTA V (.75), XMB reboot (.77) | Each log ends 0.4–6 s into `Stopping emulator...`, with `Emulation Join Thread` waiting on whatever is slow: `VK Pipeline Cache Saver` ×4, `rsx::thread` ×2, `Network Thread` ×1. **No fatal line and no crash event in any of them.** An unhandled exception or `std::terminate` would have produced both (RPCS3's handlers → the port's `report_fatal_error`), so a fail-fast that skips them is the likely end. The port's heap guard does exactly that on heap corruption, and a stop frees a lot of memory. | **#41 is the one to test first.** It keeps and uploads `heap_guard.log`, which would name the corrupted block and stack. #42 / #45 make the stop shorter but don't explain the death. | Medium |
+| PS Home silent end 25 s after boot (00:06) | `3735122c`, 1 | Mid SPU compile, no error, no stop. Nothing more in the log. | (#41) | — |
+
 ### Notes (not bugs yet)
 - Portal 2 compiles ~1,700 D3D12 PSOs at ~500 ms each in **every** session (`MESA: dzn: PSOs: 0 from the library, 1728 compiled (avg 494.5 ms)`), even with the Vulkan pipeline cache. That cache keeps SPIR-V→DXIL but not the D3D12 PSO compile, because the PSO library stays off. It's the main "shader compile" cost there.
 - 50 Cent menu or loading frames: 1 draw and 836 FIFO commands, but 80–115 ms of GPU time (present wait). Probably a movie or texture-conversion path that is slow on Dozen. Menus only, low priority.
