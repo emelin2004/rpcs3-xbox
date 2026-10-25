@@ -84,6 +84,13 @@ The timer resolution is already raised to 1 ms in every log (`UWP: timer resolut
 | **RSX spins in `NV406E_SEMAPHORE_ACQUIRE`** (hiccups, all games) | GTA V, Wolverine, PS Home, Portal 2 | Hitch frames with ≥30% in this wait: Wolverine 690/930, GTA V 110/160, PS Home 84/293, Portal 2 63/782. Wolverine's menu: `RSX busy 98% (idle 91%)`, `RSX CPU 125 ms` in a 118 ms frame. The wait is a pure spin, so RSX holds a core the PPU/SPU threads need (GTA V is SPU-bound). The FIFO idle wait already sleeps after 1 ms; this one didn't. | [emelin2004/rpcs3-xbox#46](https://github.com/emelin2004/rpcs3-xbox/pull/46): same 1 ms → 200 µs sleep rule, same `rsx_idle_sleep` switch. Needs a console A/B. | High (CPU), medium (fps gain) |
 | Wolverine stutters: 606 hitches in 14 min (22–24 fps) | `03552d8b` | First run (`0 cached functions`): mostly 100–125 ms game-side frames during SPU/PPU compiles, plus the semaphore spin above. | Check the next run with a warm cache | Medium |
 
+## Pass 7: 2026-10-25, 02:49–03:05 UTC
+
+| What | Installs / reports | Findings | Fix / next step | Confidence |
+|------|--------------------|----------|-----------------|------------|
+| Wolverine BLUS30268: `Verification failed (object: 0x0)` at `VKGSRender.cpp:1096` (`on_vram_exhausted`), then an access violation (02:28) | `03552d8b`, 1 | **Memory pressure at the cap**: after 32 min, app memory 4.73 GB of 5 GB, committed 5.27 GB (private 4.1 GB). The VRAM heap was over its 1 GB budget (blocks 1,122 MB, 1,683 descriptor pools and growing). RSX hit the exhaustion inside an uninterruptible section, where it may not evict, so the `ensure` fired. Game-specific, like PS Home's plaza OOM. | No code change. Worth a test with a lower `LocalState/vram_limit`, or Resolution Scale below 100, to see whether it stays under the cap | Medium |
+| New install `e541b716` (.77): XMB ended silently after 8 min (02:36) | 1 | First boot (146 PPU modules compiled), then idle in the XMB at 1.7 GB. The log just stops, with no stop and no error. The user then started Minecraft. Not the reboot-stop death of `39717ffa` (no `sys_sm_shutdown` here). | (#41 heap-guard log) | — |
+
 ### Notes (not bugs yet)
 - Portal 2 compiles ~1,700 D3D12 PSOs at ~500 ms each in **every** session (`MESA: dzn: PSOs: 0 from the library, 1728 compiled (avg 494.5 ms)`), even with the Vulkan pipeline cache. That cache keeps SPIR-V→DXIL but not the D3D12 PSO compile, because the PSO library stays off. It's the main "shader compile" cost there.
 - 50 Cent menu or loading frames: 1 draw and 836 FIFO commands, but 80–115 ms of GPU time (present wait). Probably a movie or texture-conversion path that is slow on Dozen. Menus only, low priority.
