@@ -50,7 +50,16 @@ The timer resolution is already raised to 1 ms in every log (`UWP: timer resolut
 | PS Home silent end after 21 min (23:49) | `3735122c`, 1 | No error and no device loss; memory 3.2 GB. Unknown. | (#41 heap-guard log) | — |
 | Portal 2: dies 3–6 s into a stop from the pause menu (third time, 23:51) | `ed2472f5`, 3 runs on .77 | Same pattern every time: RSX waits on `VK Pipeline Cache Saver`. Cache saves normally take 0.1–0.3 s but took **254 s** once in this same run (19 MB, cache on the USB drive `E:`), and 7 s / 34 s in F1. Also, a stop always saved once more, even right after a save. Why the process then dies is still not visible. | [emelin2004/rpcs3-xbox#45](https://github.com/emelin2004/rpcs3-xbox/pull/45): no redundant save at stop; saves timed as "getting" vs "writing". | Medium |
 
+## Pass 3: 2026-10-25, 00:00–00:15 UTC
+
+| What | Installs / reports | Findings | Fix / next step | Confidence |
+|------|--------------------|----------|-----------------|------------|
+| PS Home NPIA00005: `VK_ERROR_OUT_OF_HOST_MEMORY` again (00:01) | `3735122c`, now 2 (23:50, 00:01) | Identical both times: RSX at FIFO **0x34500**, about 45–50 s after boot, **0.3–0.7 s after `rpcn: You are now logged in RPCN`**. Dozen `CreateDescriptorHeap` fails (`dzn_descriptor_set.c:959`) and Present reports the device lost in the same ms. Just before it, a 2 s "no new frame" stall with RSX idle (get == put) and `main_thread` in `sceNp2Init`. Not a rendering hang: the GPU had nothing to do. | #39 will name the reason. **A/B to try on the console:** PS Home with RPCN signed out (or `Net: Internet enabled: Disconnected` in a custom config) to see whether it gets past this point. | Medium (repeatable spot); cause open |
+| PS Home silent ends (23:55, 23:59) | `3735122c`, 2 | No error, no device loss, no RPCN login nearby. The log just stops. (The `sys_rsx_context_attribute 0x101` calls near the end are per-frame vsync setup, 3,929 in one run, so not a trigger.) | #41 (heap-guard log) should show whether the heap guard ended them | — |
+| Minecraft BLES01976 (.77, 23:56) | `ed2472f5` | 56.7 fps, 4.5 stutters/min, same as before (RSX at the 60 fps limit) | A/B configs in the hiccups table | — |
+
 ### Notes (not bugs yet)
+- Portal 2 compiles ~1,700 D3D12 PSOs at ~500 ms each in **every** session (`MESA: dzn: PSOs: 0 from the library, 1728 compiled (avg 494.5 ms)`), even with the Vulkan pipeline cache. That cache keeps SPIR-V→DXIL but not the D3D12 PSO compile, because the PSO library stays off. It's the main "shader compile" cost there.
 - 50 Cent menu or loading frames: 1 draw and 836 FIFO commands, but 80–115 ms of GPU time (present wait). Probably a movie or texture-conversion path that is slow on Dozen. Menus only, low priority.
 - XMB sessions show 230–760 fps averages on the Performance page, with VSync off and frame limit Auto. Worth checking whether the XMB really runs unlimited, which would waste GPU time and power, or whether the server's average is off.
 - GTA V now averages about 25 fps (SPU-bound, 95%), better than the ~10 fps in the notes.
