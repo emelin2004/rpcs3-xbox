@@ -260,3 +260,19 @@ Installs on the new versions:
 | **Dragon Ball: Raging Blast 2** BLUS30581: `on_vram_exhausted` check at `VKGSRender.cpp:1096` (`Not enough memory resources`) | `8c902e96`, 1 | VRAM grew from 512 to 1419 MB in 0.5 s, about 900 MB, all memory type 2 in the undefined pool, while app memory was only 2.0 of 5 GB. It went past the 1228 MB budget inside a section where RPCS3 can't evict, so the check failed. This is the same failure as Wolverine on .77. Something allocates ~130 MB per 70 ms at a scene change; the log doesn't show what. | Not fixed. Needs a log of the allocations of that memory type during the burst, or a test with `LocalState/vram_limit` raised. Game-specific trigger, port-wide limit. | Medium |
 | DRIVER San Francisco GPU device lost | `61d1a216`, 1 | See #39 above. | Watch for repeats. If it happens again, try `LocalState/d3d12_debug` for the D3D12 reason. | Low |
 
+## Pass 18: 2026-10-25, 13:58–14:15 UTC
+
+(Pass at 12:58: no new data.)
+
+`8c902e96` (Series X) has moved to 0.1.35.0: Minecraft, then Mortal Kombat Komplete Edition twice. `68d59293` (Series S) only ran a bundled test program (`dump_stack.elf`), still without firmware.
+
+| What | Installs / reports | Findings | Fix / next step | Confidence |
+|------|--------------------|----------|-----------------|------------|
+| **MK Komplete Edition** `VK_ERROR_OUT_OF_HOST_MEMORY` / Dozen `Close failed: 0x80070057` (13:57, 0.1.35.0) | `8c902e96`, now 2 (.78 and 0.1.35.0) | The same failure on the new core, 5:20 in. Memory was 2.6 of 5 GB. The last 400 calls have the same mix as on .78 (301 `CopyTextureRegion`). The RSX register dump at the fatal shows a **0×0 blit** (`Blit engine: output width: 0 height: 0`, `DS DX: 0`, `DT DY: 0`, input 2×1) in **both** MK crashes. That supports #55's guess for MK. Both LittleBigPlanet crashes show a normal 256×256 blit instead, so LBP's invalid call is probably a different one. | [#55](https://github.com/emelin2004/rpcs3-xbox/pull/55) (other session) for MK. For LBP, one run with `LocalState/dzn_probe`. | Medium-high (MK), open (LBP) |
+| Sampler crash after the RSX fatal | same run | `0xC0000005` on the sampler thread 40 ms later: now 6 of 6 RSX fatals. | [#56](https://github.com/emelin2004/rpcs3-xbox/pull/56) | High |
+| MK KE `ended_during_game` (13:58) | `8c902e96` | The player restarted MK and closed the app from Xbox Home 5 s into the boot (`UWP: suspending (nothing to pause)`), but it was reported as a crash. | [#52](https://github.com/emelin2004/rpcs3-xbox/pull/52) (suspend mark written as raw bytes) | High |
+
+### 0.1.35.0 against .78 (same console)
+- Minecraft BLUS31426: median **55.0 fps** (148 reports), up from 49.9 on .78. RSX busy 80% vs 82%. The hitch rate is the same, about 53 per minute. No error.
+- No new error types, no new asserts, no boot failures on 0.1.35.0 so far (4 installs).
+
