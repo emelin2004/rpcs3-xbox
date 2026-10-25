@@ -123,6 +123,14 @@ The timer resolution is already raised to 1 ms in every log (`UWP: timer resolut
 | `spurs_test.self`: `vm::writer_lock is being used without cpu_flag::wait set by the caller!` in `sys_spu_image_close` (03:24) | `ee91f95f` (new install, no firmware), 1 | The HLE `sys_spu_image_close` frees a **user** SPU image with `vm::dealloc` without setting `cpu_flag::wait`, which the writer lock requires. The syscall version for kernel images sets it. Upstream master has the same code, so any game closing a user SPU image takes this path. | [emelin2004/rpcs3-xbox#47](https://github.com/emelin2004/rpcs3-xbox/pull/47): one line, same pattern as the syscall. Port-wide; worth sending upstream. | High |
 | Bundled test programs (`dump_stack.elf`, `gs_gcm_basic_triangle.elf`, `gs_gcm_cube.elf`) "ended during game" | `ee91f95f`, 3 | **No firmware installed**; the user tried the programs from the package's `test/` folder. Each log just stops after 40 s to 2.5 min, with no error. Most likely the player closed the app. | No code change. UX idea: with no firmware, point new users to the firmware install instead of listing test programs | Low |
 
+## Pass 9–10: 2026-10-25, 04:13–05:05 UTC
+
+Quiet (no crashes since 03:24). One new session:
+
+| What | Installs | Findings | Next step | Confidence |
+|------|----------|----------|-----------|------------|
+| LittleBigPlanet BCUS98148 (first run): 2 min at 5.7 fps, frames of 2–4 s | `39717ffa` | First run: 181 PPU modules and 1,031 SPU functions compiled, `0 cached functions`. Some long frames are RSX **CPU-bound inside a single draw** (`SET_BEGIN_END 98%`, RSX CPU 2,219 ms of a 2,365 ms frame, 0 new pipelines, FIFO not empty). Draw-time PSO variants in Dozen are ruled out: none in any `mesa.log`. Also `CELL_EFAULT` on `sys_fs_read`/`sys_fs_write` around the save data and a failed `TROPUSR.DAT` copy at boot. | Look at the next LittleBigPlanet session with warm caches. If 2 s draws remain, sample inside the draw (vertex/index processing vs. texture cache). | Low |
+
 ### Notes (not bugs yet)
 - Portal 2 compiles ~1,700 D3D12 PSOs at ~500 ms each in **every** session (`MESA: dzn: PSOs: 0 from the library, 1728 compiled (avg 494.5 ms)`), even with the Vulkan pipeline cache. That cache keeps SPIR-V→DXIL but not the D3D12 PSO compile, because the PSO library stays off. It's the main "shader compile" cost there.
 - 50 Cent menu or loading frames: 1 draw and 836 FIFO commands, but 80–115 ms of GPU time (present wait). Probably a movie or texture-conversion path that is slow on Dozen. Menus only, low priority.
