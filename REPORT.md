@@ -5,7 +5,7 @@ Nothing here is merged; every PR needs a console test first.
 
 ## Morning summary: what to test, in this order
 
-None of the app PRs were built in the cloud session (no UWP toolchain there); each has a console check in its description. All are branched from main (0.1.34.77) and independent, and the first ten were checked to merge together without conflicts (11 files, +180/−15; #48 touches only `uwp_telemetry.cpp`'s `on_fatal`); a test build with several of them needs a version of .78 or higher.
+None of the app PRs were built in the cloud session (no UWP toolchain there); each has a console check in its description. All are branched from main (0.1.34.77) and independent, and the first ten were checked to merge together without conflicts (11 files, +180/−15; #48 touches only `uwp_telemetry.cpp`'s `on_fatal`; #49 touches only `start_game_entry` in `uwp_frontend.cpp`); a test build with several of them needs a version of .78 or higher.
 
 | # | PR | What it should show on the console | Why first |
 |---|----|------------------------------------|-----------|
@@ -20,6 +20,7 @@ None of the app PRs were built in the cloud session (no UWP toolchain there); ea
 | 9 | [#43](https://github.com/emelin2004/rpcs3-xbox/pull/43) cellMicIsAttached | No `Inserting headset` / `cellMicOpenEx` loop in 50 Cent | Log size and wasted game time |
 | 10 | [#48](https://github.com/emelin2004/rpcs3-xbox/pull/48) Dozen + memory logs with a fatal error | `mesa` and `memory` logs next to every fatal crash in the panel | Dozen's own failure reason (e.g. `CommandList::Close failed`) never reached the panel |
 | 11 | [#47](https://github.com/emelin2004/rpcs3-xbox/pull/47) sys_spu_image_close wait flag | `spurs_test.self` runs to its end | Small upstream fix |
+| 12 | [#49](https://github.com/emelin2004/rpcs3-xbox/pull/49) no second boot over a starting game | Two quick A presses on a Games entry boot once and log `UI: not booting ...` | One XMB crash (`System.cpp:1099`) tonight; small UI guard |
 | — | [telemetry#6](https://github.com/emelin2004/rpcs3-xbox-telemetry/pull/6), [telemetry#7](https://github.com/emelin2004/rpcs3-xbox-telemetry/pull/7) | Panel classes "present wait" as GPU, and shader stutters only when RSX was busy | Server only; `npm test` passes (17/17) |
 
 **Console A/Bs that need no build** (`LocalState/config_override.yml`, applies to every game, delete afterwards):
@@ -169,3 +170,16 @@ Quiet (no crashes since 03:24). One new session:
 - Each Portal 2 frame logs `NV3089_IMAGE_IN: Operation writes memory onto itself ... Will ignore` (about 30 lines/s). Harmless, but it fills the live log.
 
 - Installs `db91d4cb` and `86f9116c` only opened the app without firmware (0 launches, no errors). Only the app_start log is sent, so a failed firmware install would not show. Maybe log or report firmware install results.
+
+## Pass 14: 2026-10-25, 08:22–08:40 UTC
+
+| What | Installs / reports | Findings | Fix / next step | Confidence |
+|------|--------------------|----------|-----------------|------------|
+| **XMB boot**: `Verification failed (object: 0x0)` at `System.cpp:1099` in `Emulator::BootGame()` (07:42) | `03552d8b`, 1 | The UI logged `UI: boot 'PS3 System Menu (XMB)'` twice, 16 ms apart, from the UI thread. The first boot ran. The second queued boot ran 3 s later, with vsh.self already running, and `BootGame`'s restore path failed `ensure(IsStopped())`. `start_game_entry` set `g_in_game` without checking it, so nothing dropped the repeat. Only duplicate boot in the logs I have. | [#49](https://github.com/emelin2004/rpcs3-xbox/pull/49): drop a boot request while a game is starting or running, and check `Emu.IsStopped(true)` before `BootGame`. Port-wide. | High (cause), fix small |
+| Mortal Kombat vs. DC Universe access violation at `0x004cedb8` | `03552d8b`, now 4 (07:26, 07:35, 07:47, 07:54) | Same instruction and address every time. | Unchanged from pass 13 (game-specific, likely emulation accuracy). | Medium |
+| Minecraft BLUS31426 `ended_during_game` (08:03) | `03552d8b` | Under a minute of play at 55 fps. The log stops mid-game at 4:10 with no error, and memory is normal (1.8 GB of 5 GB). Same pattern as the 06:24 and 06:54 ends. | Likely a quit from Xbox Home (the silent-end group); #41 will show if it isn't. | Low |
+
+### Notes
+- Install `03552d8b` now has `rpcs3/patches/imported_patch.yml` in a format RPCS3 doesn't read: about 25 `PAT: Error: Skipping Patch key ... expected Map, found Sequence` lines per boot, for MK vs DC, Minecraft, Wolverine, GTA IV and Max Payne 3. That's an error, not a fatal, so it doesn't stop the boot, but none of those patches apply. RPCS3's patch files need `PPU-<hash>:` keys under the game title; a list keyed by serial is skipped.
+- No new perf data beyond pass 13 (one 1-minute Minecraft session).
+
