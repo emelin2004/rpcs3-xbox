@@ -3,6 +3,31 @@
 Running notes from the panel checks. Installs are shown by the first 8 characters of their anonymous ID.
 Nothing here is merged; every PR needs a console test first.
 
+## Morning summary: what to test, in this order
+
+None of the app PRs were built in the cloud session (no UWP toolchain there); each has a console check in its description. All are branched from main (0.1.34.77) and are independent; a test build with several of them needs a version of .78 or higher.
+
+| # | PR | What it should show on the console | Why first |
+|---|----|------------------------------------|-----------|
+| 1 | [#41](https://github.com/emelin2004/rpcs3-xbox/pull/41) heap-guard log upload | After a silent end, a `crash` log with the heap guard's text in the panel | Explains the largest unexplained group: silent ends and deaths during a stop (Portal 2, PS Home, Snake Ball, first-boot XMB) |
+| 2 | [#45](https://github.com/emelin2004/rpcs3-xbox/pull/45) pipeline cache saver at stop | `stopping the pipeline cache saver (...)` at every stop; no 10 s watchdog with an idle saver; saves timed in two parts | 4 Stop Watchdog fatals on .77 tonight all wait on this thread |
+| 3 | [#42](https://github.com/emelin2004/rpcs3-xbox/pull/42) slow stop isn't a deadlock | No error screen for stops under 60 s | Pairs with #45 |
+| 4 | [#38](https://github.com/emelin2004/rpcs3-xbox/pull/38) broken patch.yml isn't fatal | No error screen / crash report from a user patch.yml error | ~25 false crash reports from one install |
+| 5 | [#39](https://github.com/emelin2004/rpcs3-xbox/pull/39) GPU device lost as the fatal line | `UWP: the GPU device was lost (<reason>)` instead of "Out of video memory"; no 170k-line log flood | 6 device losses (50 Cent, SAW 2, PS Home); the reason decides the next fix |
+| 6 | [#44](https://github.com/emelin2004/rpcs3-xbox/pull/44) pause on suspend | `UWP: suspending (game paused)` / `resuming`; game continues after a minute in Xbox Home | 2 of the device losses came right after a suspend |
+| 7 | [#40](https://github.com/emelin2004/rpcs3-xbox/pull/40) no shader interpreter | Settings shows two shader modes; an old interpreter config is replaced at boot | 72-minute Portal 2 boot and memory-cap death; a player switched to it again tonight |
+| 8 | [#46](https://github.com/emelin2004/rpcs3-xbox/pull/46) RSX semaphore wait sleeps | Lower `RSX busy` while waiting; compare fps with `LocalState/rsx_idle_sleep` = 0 | Timing change: needs an A/B (GTA V, Wolverine, Portal 2) |
+| 9 | [#43](https://github.com/emelin2004/rpcs3-xbox/pull/43) cellMicIsAttached | No `Inserting headset` / `cellMicOpenEx` loop in 50 Cent | Log size and wasted game time |
+| 10 | [#47](https://github.com/emelin2004/rpcs3-xbox/pull/47) sys_spu_image_close wait flag | `spurs_test.self` runs to its end | Small upstream fix |
+| — | [telemetry#6](https://github.com/emelin2004/rpcs3-xbox-telemetry/pull/6), [telemetry#7](https://github.com/emelin2004/rpcs3-xbox-telemetry/pull/7) | Panel classes "present wait" as GPU, and shader stutters only when RSX was busy | Server only; `npm test` passes (17/17) |
+
+**Console A/Bs that need no build** (`LocalState/config_override.yml`, applies to every game, delete afterwards):
+- Minecraft microstutter (RSX at the 60 fps limit): `Video:` / `  Multithreaded RSX: true`, then separately `Core:` / `  RSX FIFO Fetch Accuracy: Fast`.
+- Wolverine memory cap: a lower `LocalState/vram_limit` (default 1536), or Resolution Scale below 100.
+- PS Home device loss at ~45 s after boot: try with RPCN signed out.
+
+**Security:** the panel tunnel (the `…ehcss.de` link) served the admin pages without a password. Put Cloudflare Access or the panel password in front of it.
+
 ## Pass 1: 2026-10-24, 23:10–23:30 UTC (data from the last 7 days)
 
 Panel totals: 8 installs (5 Series S, 3 Series X), 84 app starts, 64 game launches, 75 crash reports.
