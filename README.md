@@ -17,15 +17,25 @@ known issues are in [uwp/README.md](uwp/README.md).
 
 ## What works (October 2026)
 
-| | |
+Based on the developer's own tests and the opt-in telemetry from players' consoles (October 24–25).
+Speeds are averages on Series X and S; the first start of a game is always slower (see below).
+
+| Game | State |
 | --- | --- |
 | PS3 system menu (XMB, firmware 4.93) | Steady 60 fps, network and web browser work |
-| Portal 2 | Playable, ~28 fps (limited by the emulated PPU main thread) |
-| Minecraft PlayStation 3 Edition | Playable, ~57 fps (pick "Continue playing offline" at the PSN prompt) |
+| Portal 2 | Playable, ~28 fps (limited by the emulated PPU main thread); short stutters |
+| Minecraft PlayStation 3 Edition | Playable, 50–57 fps with small stutters (pick "Continue playing offline" at the PSN prompt) |
 | Jetpack Joyride Deluxe | Playable, 60 fps |
-| PlayStation Home | Launches and works, ~20 fps; sometimes crashes in the main plaza (runs out of memory) |
-| GTA V, Watch Dogs, Plants vs. Zombies Garden Warfare | Boot, but not playable (single-digit fps or out of memory) |
-| 007 Legends, | Boots, intro scene around 40 to 55 fps |
+| GTA V | In-game, ~25 fps (limited by the emulated SPUs) |
+| X-Men Origins: Wolverine | In-game, 22–24 fps; can crash after about 30 minutes when memory runs out |
+| PlayStation Home | Works, ~20 fps; sometimes crashes in the main plaza or right after the RPCN sign-in |
+| 50 Cent: Blood on the Sand, SAW II | In-game, but can crash mid-game (the GPU device is lost) |
+| LittleBigPlanet | Boots; slow on the first start, crashes after a few minutes in game |
+| Mortal Kombat vs. DC Universe | Crashes about 10 minutes in, every time |
+| 007 Legends | Boots, intro scene around 40 to 55 fps |
+| Watch Dogs, Plants vs. Zombies Garden Warfare | Boot, but not playable (single-digit fps or crashes) |
+
+Tried a game that isn't listed? Compatibility reports are welcome (see [Contributing](#contributing)).
 
 Heavy games are mostly CPU-bound: the Xbox runs the PPU/SPU recompilers fine, but big games need
 more CPU and memory than a UWP game app gets (5 GB). The first start of the XMB or a game compiles
