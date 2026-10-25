@@ -209,3 +209,24 @@ Quiet (no crashes since 03:24). One new session:
 |------|--------------------|----------|-----------------|------------|
 | XMB `ended_during_game` (09:54) | `8c902e96`, 1 | The log and the memory log both stop right after `UWP: suspending (game paused)`, and the app started again 13 s later. It should have been reported as `game_exit` / `app_closed`, but the `suspended` mark wasn't in `telemetry_session`. **No install has ever reported `app_closed`** (15 installs checked; there's 1 `app_updated`). So the suspend mark probably never works, and part of the `ended_during_game` group is really "closed from Xbox Home". The code paths look right, so I can't tell from here whether `on_suspend` didn't write, or the app resumed briefly (which clears the mark) and then died before the log was flushed. | [#52](https://github.com/emelin2004/rpcs3-xbox/pull/52): log what `on_suspend`, `on_resume` and `report_previous_run` did, write the mark with a flush, and sync RPCS3.log at suspend. A diagnostic, not a fix. | High that the mark is missing; cause unknown |
 
+## Pass 16: 2026-10-25, 10:58–11:20 UTC
+
+Main is now **0.1.35.0** ([#51](https://github.com/emelin2004/rpcs3-xbox/pull/51), the RPCS3 core updated to upstream 8b9ee60, merged 10:27). Its builds haven't reported yet. New fix branches start from that main; #52 and #56 merge into it cleanly.
+
+On .78, `8c902e96` is now at 6 app starts and 5 launches, with 2 new fatal errors in Mortal Kombat Komplete Edition BLUS30902. `dac7dad0` shows nothing new.
+
+### 0.1.34.78 fix status (changes since pass 15)
+| PR | Status | Evidence |
+|----|--------|----------|
+| #48 Dozen + memory logs with a fatal | **Works** | Both MK fatals came with `mesa` and `memory` logs from the same run. They name Dozen's reason for the first time: `ID3D12GraphicsCommandList::Close failed: 0x80070057`. |
+| #45 / #42 / #44 / #49 | No new data | No stop, suspend or double boot in the new runs. |
+| #39, #41, #46, #38, #40, #43, #47 | Not hit | |
+| New errors from .78 | None seen | |
+
+### Crashes
+| What | Installs / reports | Findings | Fix / next step | Confidence |
+|------|--------------------|----------|-----------------|------------|
+| **Second fatal after any RSX fatal**: `Unhandled Win32 exception 0xC0000005` about 30 ms after the RSX thread dies | `8c902e96` (MK KE, .78); `abb26e7c` (LBP, .77, twice) | Every time, it's the `UWP RSX sampled` thread, reading the RSX thread's stack. `uwp_rsx_sampler` polls a stop flag on that stack. A fatal error ends the RSX thread through `emergency_exit` → `_endthreadex` without unwinding, so the flag is never set and the stack is freed. Port-wide. | [#56](https://github.com/emelin2004/rpcs3-xbox/pull/56): the stop flag moves into a `shared_ptr`, and the sampler also ends when the next RSX run starts. The app then stays on the error screen with the real reason. | High (3 of 3 RSX fatals) |
+| **MK Komplete Edition** `VK_ERROR_OUT_OF_HOST_MEMORY` in `command_buffer::end()` (10:26) | `8c902e96`, 1 | It isn't memory: app memory was 2.8 of 5 GB. Dozen logs `Close failed: 0x80070057` (E_INVALIDARG). That command list had more than 4096 D3D12 calls (the trace ring is full), and 301 of the last 400 are `CopyTextureRegion`. That's the same signature as LittleBigPlanet's `dzn_cmd_buffer.c:1179` failure on .77. Some recorded call is invalid, most likely a copy. | [#55](https://github.com/emelin2004/rpcs3-xbox/pull/55), opened in another session, skips empty image copies and adds `LocalState/dzn_probe`. With the probe on, the next repro names the call that breaks the list. | Medium (cause class), high (not a memory problem) |
+| **MK Komplete Edition** SPU `[0x3dd34] Invalid code` → `Compilation failed` (10:28) | `8c902e96`, 1 | `MwyCellSpursKernel3` jumped to code that doesn't decode, 2 min in. That's an SPU emulation issue: a wrong jump or corrupted local store, not the port. | Game-specific. Try the SPU settings for BLUS30902 (SPU loop detection off, Accurate DMA) once more runs show whether it repeats. | Medium |
+
