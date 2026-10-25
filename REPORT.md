@@ -76,6 +76,14 @@ The timer resolution is already raised to 1 ms in every log (`UWP: timer resolut
 
 - Install `03552d8b` keeps its games inside LocalState and is down to **1,175 MB free of 30 GB** (3 GB at 22:00). If it fills up, saves, caches and logs will start failing on that console. Not a code problem, but worth telling the player.
 
+## Pass 6: 2026-10-25, 02:06–02:30 UTC
+
+| What | Installs / reports | Findings | Fix / next step | Confidence |
+|------|--------------------|----------|-----------------|------------|
+| X-Men Origins: Wolverine BLUS30268: Stop Watchdog at game exit (01:50) | `03552d8b`, 1 | 4th watchdog on .77 with the same chain: `rsx::thread` → `VK Pipeline Cache Saver`. Its last save took **177,605 ms** for 9 MB while the pipeline count rose 79 → 554. **Every slow save so far (254 s, 177 s, 102 s, 34 s, 7 s) fell in a compile burst.** In the 50 Cent case an *idle* saver still held a stop >12.9 s, longer than its own 10 s wait. | [#45](https://github.com/emelin2004/rpcs3-xbox/pull/45) extended: the saver checks for a stop every 250 ms (by the clock), plus the phase logging. If idle-saver stops get fast, a lost wake-up was the cause; if a save is running, the log now says whether it's getting the data or writing the file. Checked: no Dozen lock spans a PSO compile, the port's `mesa_sysstubs.c` only stubs GDI, and thread priorities are normal. | Medium |
+| **RSX spins in `NV406E_SEMAPHORE_ACQUIRE`** (hiccups, all games) | GTA V, Wolverine, PS Home, Portal 2 | Hitch frames with ≥30% in this wait: Wolverine 690/930, GTA V 110/160, PS Home 84/293, Portal 2 63/782. Wolverine's menu: `RSX busy 98% (idle 91%)`, `RSX CPU 125 ms` in a 118 ms frame. The wait is a pure spin, so RSX holds a core the PPU/SPU threads need (GTA V is SPU-bound). The FIFO idle wait already sleeps after 1 ms; this one didn't. | [emelin2004/rpcs3-xbox#46](https://github.com/emelin2004/rpcs3-xbox/pull/46): same 1 ms → 200 µs sleep rule, same `rsx_idle_sleep` switch. Needs a console A/B. | High (CPU), medium (fps gain) |
+| Wolverine stutters: 606 hitches in 14 min (22–24 fps) | `03552d8b` | First run (`0 cached functions`): mostly 100–125 ms game-side frames during SPU/PPU compiles, plus the semaphore spin above. | Check the next run with a warm cache | Medium |
+
 ### Notes (not bugs yet)
 - Portal 2 compiles ~1,700 D3D12 PSOs at ~500 ms each in **every** session (`MESA: dzn: PSOs: 0 from the library, 1728 compiled (avg 494.5 ms)`), even with the Vulkan pipeline cache. That cache keeps SPIR-V→DXIL but not the D3D12 PSO compile, because the PSO library stays off. It's the main "shader compile" cost there.
 - 50 Cent menu or loading frames: 1 draw and 836 FIFO commands, but 80–115 ms of GPU time (present wait). Probably a movie or texture-conversion path that is slow on Dozen. Menus only, low priority.
