@@ -5,7 +5,7 @@ Nothing here is merged; every PR needs a console test first.
 
 ## Morning summary: what to test, in this order
 
-None of the app PRs were built in the cloud session (no UWP toolchain there); each has a console check in its description. All are branched from main (0.1.34.77) and independent, and all ten merge together without conflicts (checked: 11 files, +180/−15); a test build with several of them needs a version of .78 or higher.
+None of the app PRs were built in the cloud session (no UWP toolchain there); each has a console check in its description. All are branched from main (0.1.34.77) and independent, and the first ten were checked to merge together without conflicts (11 files, +180/−15; #48 touches only `uwp_telemetry.cpp`'s `on_fatal`); a test build with several of them needs a version of .78 or higher.
 
 | # | PR | What it should show on the console | Why first |
 |---|----|------------------------------------|-----------|
@@ -18,7 +18,8 @@ None of the app PRs were built in the cloud session (no UWP toolchain there); ea
 | 7 | [#40](https://github.com/emelin2004/rpcs3-xbox/pull/40) no shader interpreter | Settings shows two shader modes; an old interpreter config is replaced at boot | 72-minute Portal 2 boot and memory-cap death; a player switched to it again tonight |
 | 8 | [#46](https://github.com/emelin2004/rpcs3-xbox/pull/46) RSX semaphore wait sleeps | Lower `RSX busy` while waiting; compare fps with `LocalState/rsx_idle_sleep` = 0 | Timing change: needs an A/B (GTA V, Wolverine, Portal 2) |
 | 9 | [#43](https://github.com/emelin2004/rpcs3-xbox/pull/43) cellMicIsAttached | No `Inserting headset` / `cellMicOpenEx` loop in 50 Cent | Log size and wasted game time |
-| 10 | [#47](https://github.com/emelin2004/rpcs3-xbox/pull/47) sys_spu_image_close wait flag | `spurs_test.self` runs to its end | Small upstream fix |
+| 10 | [#48](https://github.com/emelin2004/rpcs3-xbox/pull/48) Dozen + memory logs with a fatal error | `mesa` and `memory` logs next to every fatal crash in the panel | Dozen's own failure reason (e.g. `CommandList::Close failed`) never reached the panel |
+| 11 | [#47](https://github.com/emelin2004/rpcs3-xbox/pull/47) sys_spu_image_close wait flag | `spurs_test.self` runs to its end | Small upstream fix |
 | — | [telemetry#6](https://github.com/emelin2004/rpcs3-xbox-telemetry/pull/6), [telemetry#7](https://github.com/emelin2004/rpcs3-xbox-telemetry/pull/7) | Panel classes "present wait" as GPU, and shader stutters only when RSX was busy | Server only; `npm test` passes (17/17) |
 
 **Console A/Bs that need no build** (`LocalState/config_override.yml`, applies to every game, delete afterwards):
@@ -136,6 +137,16 @@ Quiet (no crashes since 03:24). One new session:
 | What | Installs | Findings | Next step | Confidence |
 |------|----------|----------|-----------|------------|
 | **Pattern: a new install's first XMB session ends silently** (05:24) | `abb26e7c` (new), same as `e541b716` (02:36) | Both: first boot (146 PPU modules), the player browses (modules load on demand until 6:25 / 16:17), then 2–4 min idle with only `sys_hid_manager_ioctl` polling, then the log stops at 1.67–1.70 GB, with no stop and no error. Both restarted the app right after. That looks like the player **leaving through the Xbox guide**. If Quit is chosen while the app is only "constrained" (Xbox button, not suspended), it may end without the Suspending event that .77 uses to tell a deliberate close from a crash, so it's reported as `ended_during_game`. | **Proposal (not coded, because it needs new WinRT ABI declarations and can't be built here):** record window activation/visibility changes (`Window.Activated` / `CoreWindow.VisibilityChanged`) in the telemetry session marker, and on the next start report a run that ended while deactivated as `app_closed` (with a note) instead of a crash. That would also shrink the "silent end" group for #41. #44 already logs Suspending/Resuming. | Medium |
+
+## Pass 12: 2026-10-25, 07:00–07:20 UTC
+
+| What | Installs / reports | Findings | Fix / next step | Confidence |
+|------|--------------------|----------|-----------------|------------|
+| LittleBigPlanet: `VK_ERROR_OUT_OF_HOST_MEMORY` in `vk::command_buffer::end()` (06:49) | `abb26e7c`, 1 | **Not memory, not a device loss**: 2.79 GB of 5 GB, no `0x887a0005`. `dzn_cmd_buffer.c:1179` is `dzn_EndCommandBuffer`: `ID3D12GraphicsCommandList::Close` failed (usually an invalid command recorded in the list). The port's Mesa patch logs the HRESULT, the D3D12 messages and a command trace to `mesa.log`, but a fatal error uploads only `RPCS3.log`. | [emelin2004/rpcs3-xbox#48](https://github.com/emelin2004/rpcs3-xbox/pull/48): send `mesa.log` and `memory.log` with every fatal error. The next one will show the D3D12 reason. | High (diagnosis path) |
+| LittleBigPlanet: savestate load crash in `lv2_socket_native::create_socket` (`ensure(family == SYS_NET_AF_INET)`, 06:55) | `abb26e7c`, 1 | The player used RPCS3's **home-menu "Save state"** at 5:03 and booted the game again. RPCS3 loaded the state and failed restoring a socket with a garbage family. Save and load code of all socket types is symmetric, but the save was taken right after `SPU thread continued after being paused (... unsavable=1)`, so the state was inconsistent. Upstream savestate behaviour. | **Decision for you:** keep "Save state" in the home menu, or hide it on the Xbox until savestates are reliable. No code change. | Medium |
+| LittleBigPlanet / XMB / test programs: 5 silent ends | `abb26e7c` | New user trying several things (XMB, `spurs_test.self`, LittleBigPlanet, changing Shader mode to *Legacy* and *Interpreter* in Settings). No error lines. | (#41, guide-quit proposal in pass 11) | — |
+| GTA IV BLUS30127: boot fails, `EBOOT.BIN` "Invalid or unsupported file format" | `03552d8b` | Bad or undecryptable copy in `dev_hdd0/game`. The menu says "Couldn't start the game: Invalid file or folder". Not a port bug. | — | High |
+| Minecraft BLUS31426: silent end while loading 83 cached PPU modules (06:54), and at 06:24 | `03552d8b`, 2 | 1.3 GB, no error, the log stops mid-load | (#41) | — |
 
 ### Notes (not bugs yet)
 - Portal 2 compiles ~1,700 D3D12 PSOs at ~500 ms each in **every** session (`MESA: dzn: PSOs: 0 from the library, 1728 compiled (avg 494.5 ms)`), even with the Vulkan pipeline cache. That cache keeps SPIR-V→DXIL but not the D3D12 PSO compile, because the PSO library stays off. It's the main "shader compile" cost there.
