@@ -16,8 +16,11 @@ namespace vk
 
 #ifdef RPCS3_UWP
 	// Time in queue submits (lock + vkQueueSubmit) and in the swapchain's frame hand-over
-	// (fence wait for the previous frame, copy to the shell); read by the hitch frame log.
+	// (fence wait for the previous frame, copy to the shell; on the frame copier thread unless
+	// LocalState/sync_present_copy); read by the hitch frame log.
 	atomic_t<u64> g_uwp_submit_us{0}, g_uwp_present_wait_us{0}, g_uwp_present_copy_us{0};
+	// The swapchain's fence wait and frame copy run on a thread of their own (swapchain_uwp.hpp).
+	bool g_uwp_async_present_copy = true;
 #endif
 
 	void acquire_global_submit_lock()
