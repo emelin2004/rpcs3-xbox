@@ -9155,6 +9155,11 @@ struct spu_llvm_worker
 };
 
 // SPU LLVM recompiler thread context
+#ifdef RPCS3_UWP
+// SPU LLVM compile workers (0 = RPCS3's count for the host's threads). Set by uwp_main.cpp.
+u32 g_uwp_spu_workers = 3;
+#endif
+
 struct spu_llvm
 {
 	// Workload
@@ -9241,6 +9246,18 @@ struct spu_llvm
 		{
 			worker_count = 2;
 		}
+
+#ifdef RPCS3_UWP
+		// The Xbox reports 8 threads, which gave 2 workers. In WipEout HD's first race both were busy
+		// back to back for over a minute (1400 blocks), the game ran 11-18 fps meanwhile, and half of its
+		// 90 ms+ frames fell while a block compiled (15% of the time by chance). LocalState/spu_workers.
+		if (g_uwp_spu_workers)
+		{
+			worker_count = g_uwp_spu_workers;
+		}
+
+		spu_log.notice("SPU LLVM: %u compile worker(s)", worker_count);
+#endif
 
 		u32 worker_index = 0;
 		u32 notify_compile_count = 0;

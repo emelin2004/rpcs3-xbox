@@ -87,6 +87,7 @@ namespace rsx { extern u32 g_uwp_rsx_idle_sleep_us; extern bool g_uwp_fifo_parti
 namespace rsx { extern atomic_t<u64> g_uwp_mem_poll_at_us, g_uwp_mem_poll_max_us; } // RSXThread.cpp
 extern u64 g_uwp_usleep_spin_us; // lv2.cpp
 extern bool g_uwp_um_wait; // lv2.cpp
+extern u32 g_uwp_spu_workers; // SPUCommonRecompiler.cpp
 extern std::string g_uwp_config_override_path; // System.cpp
 
 namespace
@@ -1012,6 +1013,13 @@ namespace
 				rsx::g_uwp_rsx_idle_sleep_us = std::min<u32>(v, 2000);
 			}
 			sys_log.always()("UWP: RSX idle sleep: %u us", rsx::g_uwp_rsx_idle_sleep_us);
+			// SPU LLVM compile workers (default 3 in SPUCommonRecompiler.cpp; RPCS3 picks 2 for 8 threads).
+			if (fs::file f{g_local_dir + "spu_workers"})
+			{
+				const u32 v = static_cast<u32>(std::strtoul(f.to_string().c_str(), nullptr, 10));
+				g_uwp_spu_workers = std::min<u32>(v, 6);
+			}
+			sys_log.always()("UWP: SPU LLVM compile workers: %s", g_uwp_spu_workers ? std::to_string(g_uwp_spu_workers) : std::string("RPCS3 default"));
 			// The FIFO cache line holding PUT is copied without the atomic re-read (RSXFIFO.cpp).
 			rsx::g_uwp_fifo_partial_line = !fs::is_file(g_local_dir + "fifo_partial_line_atomic");
 			sys_log.always()("UWP: FIFO line at PUT: %s", rsx::g_uwp_fifo_partial_line ? "plain copy" : "atomic re-read");

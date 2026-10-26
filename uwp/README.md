@@ -212,6 +212,9 @@ Empty files in the app's `LocalState` folder (via Device Portal file explorer):
 - `rsx_idle_sleep`: microseconds the RSX thread sleeps per check once the game has given it
   nothing to do, or kept it waiting on a semaphore, for 1 ms, instead of spinning (default 200;
   `0` spins as RPCS3 does).
+- `spu_workers`: number of SPU LLVM compile threads (default 3; RPCS3 picks 2 for the Xbox's
+  8 threads; `0` uses RPCS3's count). More threads shorten the slow stretch while a game's SPU
+  code compiles for the first time.
 - `dynamic_stencil_bias`: keep stencil masks and depth bias as Vulkan dynamic state. By default
   they are baked into the pipelines, because Dozen otherwise builds a D3D12 PSO for each new value
   at draw time on the RSX thread (hitches of 0.1-4 s in Portal 2).
