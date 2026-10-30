@@ -7,6 +7,7 @@
 #include "Crypto/utils.h"
 
 #include <chrono>
+#include <thread>
 #include <codecvt>
 #include <algorithm>
 #include <cmath>
@@ -1482,12 +1483,35 @@ std::unique_ptr<fs::file_base> iso_archive::get_iso_file(const std::string& path
 		return nullptr;
 	}
 
-	if (m_dec->get_enc_type() == iso_encryption_type::NONE)
+	// Every file of the image opens the image path again, and on the Xbox that open now and then fails for a moment
+	// ("cannot find the file specified" on a USB drive that is busy writing). A file left without a handle is a
+	// fatal "Null object" on its first seek, so try again shortly and then give the game a file error instead
+	for (int attempt = 0;; attempt++)
 	{
-		return std::make_unique<iso_file>(path, mode, node);
-	}
+		std::unique_ptr<iso_file> file;
 
-	return std::make_unique<iso_file_encrypted>(path, mode, node, m_dec);
+		if (m_dec->get_enc_type() == iso_encryption_type::NONE)
+		{
+			file = std::make_unique<iso_file>(path, mode, node);
+		}
+		else
+		{
+			file = std::make_unique<iso_file_encrypted>(path, mode, node, m_dec);
+		}
+
+		if (*file)
+		{
+			return file;
+		}
+
+		if (attempt >= 3)
+		{
+			// The failed open left its error in fs::g_tls_error for the caller
+			return nullptr;
+		}
+
+		std::this_thread::sleep_for(std::chrono::milliseconds(20 << attempt));
+	}
 }
 
 std::unique_ptr<fs::file_base> iso_archive::open(const std::string& path)
