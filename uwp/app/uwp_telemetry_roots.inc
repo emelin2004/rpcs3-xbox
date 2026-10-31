@@ -1,5 +1,6 @@
 // Root certificates for the telemetry server's TLS (rpcs3.emelinhabibovic.de, behind Cloudflare)
-// and the update check (api.github.com, a Sectigo certificate under USERTrust).
+// the update check (api.github.com, a Sectigo certificate under USERTrust) and the patch download
+// (rpcs3.net, behind Cloudflare).
 // The Xbox gives apps no system certificate store (uwp_sysstubs.c), so curl gets these instead:
 // the roots Cloudflare's edge certificates chain to (Let's Encrypt, Google Trust Services, SSL.com,
 // Sectigo, DigiCert, GlobalSign). Taken from the Mozilla CA list (ca-certificates).

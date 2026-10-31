@@ -12,6 +12,7 @@
 #include "uwp_frontend.h"
 #include "uwp_firmware.h"
 #include "uwp_update.h"
+#include "uwp_patches.h"
 #include "uwp_rpcn.h"
 #include "uwp_telemetry.h"
 #include "uwp_textinput.h"
@@ -32,6 +33,7 @@
 #include "Crypto/unpkg.h"
 #include "Utilities/Thread.h"
 #include "Utilities/File.h"
+#include "Utilities/bin_patch.h"
 #include "util/sysinfo.hpp"
 #include "util/cctype.hpp"
 #include "util/yaml.hpp"
@@ -3287,6 +3289,13 @@ namespace uwp_frontend
 			bool own_file = false; // the custom config exists
 			bool built_in = false; // `own` came from the built-in settings (get_database_config)
 			std::vector<setting_item> items;
+			// Community patches (patches/patch.yml, on or off in patch_config.yml) for the game's version.
+			std::string app_version;
+			uwp_patches::game_patches patches;
+			bool patches_listed = false;
+			// What get_game_settings() returned last, in its order: an item, the download row or a patch.
+			enum class row_kind { item, download, patch };
+			std::vector<std::pair<row_kind, u32>> rows;
 		};
 
 		std::unique_ptr<game_settings_state> g_game_settings;
@@ -3372,6 +3381,137 @@ namespace uwp_frontend
 		}
 	}
 
+	namespace
+	{
+		atomic_t<u64> g_game_settings_serial{1};
+		bool g_patches_checked = false; // the silent check of patch.yml, once per app start
+
+		// The version the game boots as: a disc game's update (an HDD "GD" entry of the same serial) has its own APP_VER.
+		std::string effective_app_version(const std::string& title_id, const std::string& version)
+		{
+			const psf::registry sfo = psf::load_object(rpcs3::utils::get_hdd0_dir() + "game/" + title_id + "/PARAM.SFO");
+			if (psf::get_string(sfo, "CATEGORY") == "GD")
+			{
+				if (const std::string_view update = psf::get_string(sfo, "APP_VER"); !update.empty())
+				{
+					if (version.empty() || uwp_update::compare(std::string(update), version) > 0)
+						return std::string(update);
+				}
+			}
+			return version;
+		}
+
+		void list_game_patches()
+		{
+			game_settings_state& gs = *g_game_settings;
+			if (gs.patches_listed)
+				return;
+			gs.patches_listed = true;
+			gs.patches = uwp_patches::list(gs.title_id, gs.app_version);
+		}
+
+		std::string patch_note(const uwp_patches::patch_row& row)
+		{
+			std::string note = row.notes;
+			for (char& c : note)
+			{
+				if (c == '\n' || c == '\r' || c == '\t')
+					c = ' ';
+			}
+			if (note.size() > 300)
+				note = note.substr(0, 297) + "...";
+			const auto add = [&](const std::string& text)
+			{
+				if (text.empty())
+					return;
+				if (!note.empty() && note.back() != '.' && note.back() != ' ')
+					note += '.';
+				if (!note.empty())
+					note += ' ';
+				note += text;
+			};
+			if (!row.author.empty())
+				add("By " + row.author + ".");
+			if (row.app_version != patch_key::all && g_game_settings && g_game_settings->app_version.empty())
+				add("For version " + row.app_version + ".");
+			if (row.configurable)
+				add("Its adjustable values keep their defaults.");
+			if (!row.group.empty())
+				add("Only one patch of its group (" + row.group + ") applies.");
+			return note;
+		}
+
+		// The Patches section: the download row, then one switch per patch of the game.
+		std::vector<setting_view> patch_views()
+		{
+			game_settings_state& gs = *g_game_settings;
+			list_game_patches();
+			std::vector<setting_view> out;
+
+			setting_view dl;
+			dl.section = "Patches";
+			dl.in_game = dl.pause_only = true;
+			dl.action = true;
+			const bool have = uwp_patches::have_patch_file();
+			dl.label = have ? "Update patches" : "Download patches";
+			dl.value = uwp_patches::downloading() ? "Downloading..." : have ? "Update" : "Download";
+			std::string note = "Community patches from RPCS3's patch list (rpcs3.net): fixes, higher frame rates and other changes made by players for many games. "
+				"They apply the next time the game starts. ";
+			if (!have)
+				note += "Not downloaded yet.";
+			else
+			{
+				const std::string date = uwp_patches::patch_file_date();
+				note += gs.patches.rows.empty() ? "None for this game" : fmt::format("%d for this game", gs.patches.rows.size());
+				if (!gs.app_version.empty())
+					note += " (version " + gs.app_version + ")";
+				note += date.empty() ? "." : ", list from " + date + ".";
+				if (!gs.patches.other_versions.empty())
+					note += " Others are for version " + fmt::merge(gs.patches.other_versions, ", ") + " of this game.";
+			}
+			dl.note = std::move(note);
+			out.push_back(std::move(dl));
+
+			for (const uwp_patches::patch_row& row : gs.patches.rows)
+			{
+				setting_view v;
+				v.section = "Patches";
+				v.in_game = v.pause_only = true;
+				v.label = row.description;
+				v.note = patch_note(row);
+				v.values = {"false", "true"};
+				v.shown = {"Off", "On"};
+				v.toggle = true;
+				v.current = row.enabled ? 1 : 0;
+				out.push_back(std::move(v));
+			}
+			return out;
+		}
+
+		// `manual`: the user asked (a message tells the result); otherwise a quiet check when the game settings open.
+		void start_patch_download(bool manual)
+		{
+			const bool started = uwp_patches::download([manual](uwp_patches::result r, const std::string& message)
+			{
+				post_ui([manual, r, message]()
+				{
+					if (r == uwp_patches::result::updated)
+					{
+						uwp_patches::invalidate();
+						if (g_game_settings)
+							g_game_settings->patches_listed = false;
+					}
+					g_game_settings_serial++;
+					if (manual || (r == uwp_patches::result::updated && g_game_settings))
+						post_modal(r == uwp_patches::result::failed ? "Patches not downloaded" : "Patches", message);
+				});
+			});
+			if (started)
+				g_game_settings_serial++; // shows "Downloading..."
+			g_patches_checked = true;
+		}
+	}
+
 	std::vector<setting_view> get_settings()
 	{
 		std::vector<setting_view> out;
@@ -3400,6 +3540,9 @@ namespace uwp_frontend
 		g_game_settings->title = game.title;
 		g_game_settings->path = rpcs3::utils::get_custom_config_path(game.title_id);
 		load_game_settings(true);
+		g_game_settings->app_version = effective_app_version(game.title_id, game.version);
+		if (!g_patches_checked && uwp_patches::have_patch_file())
+			start_patch_download(false); // as the desktop Patch Manager: a newer list, if there is one
 		ui_log.notice("UI: settings of %s (%s)%s", game.title, game.title_id, g_game_settings->own_file ? ", from its custom config" : g_game_settings->built_in ? ", with built-in ones" : "");
 		return true;
 	}
@@ -3427,20 +3570,66 @@ namespace uwp_frontend
 	std::vector<setting_view> get_game_settings()
 	{
 		std::vector<setting_view> out;
-		if (g_game_settings)
+		if (!g_game_settings)
+			return out;
+		game_settings_state& gs = *g_game_settings;
+		using kind = game_settings_state::row_kind;
+		gs.rows.clear();
+		bool patches_added = false;
+		for (u32 i = 0; i <= gs.items.size(); i++)
 		{
-			for (setting_item& item : g_game_settings->items)
-				out.push_back(to_setting_view(item));
+			// The Patches section before Debug (or last).
+			if (!patches_added && (i == gs.items.size() || gs.items[i].section == "Debug"))
+			{
+				patches_added = true;
+				u32 j = 0; // 0: the download row, then the patches
+				for (setting_view& v : patch_views())
+				{
+					gs.rows.emplace_back(v.action ? kind::download : kind::patch, j++);
+					out.push_back(std::move(v));
+				}
+			}
+			if (i == gs.items.size())
+				break;
+			gs.rows.emplace_back(kind::item, i);
+			out.push_back(to_setting_view(gs.items[i]));
 		}
 		return out;
 	}
 
+	void open_game_setting(u32 index)
+	{
+		if (!g_game_settings || index >= g_game_settings->rows.size() || g_game_settings->rows[index].first != game_settings_state::row_kind::download)
+			return;
+		start_patch_download(true);
+	}
+
+	u64 game_settings_serial()
+	{
+		return g_game_settings_serial;
+	}
+
 	void set_game_setting(u32 index, u32 value_index)
 	{
-		if (!g_game_settings || index >= g_game_settings->items.size())
+		if (!g_game_settings || index >= g_game_settings->rows.size())
 			return;
 		game_settings_state& gs = *g_game_settings;
-		setting_item& item = gs.items[index];
+		const auto [kind, at] = gs.rows[index];
+		if (kind == game_settings_state::row_kind::patch)
+		{
+			list_game_patches();
+			const usz row = at - 1; // after the download row
+			if (row >= gs.patches.rows.size() || gs.patches.rows[row].enabled == (value_index == 1))
+				return;
+			const bool others = uwp_patches::set_enabled(gs.title_id, gs.app_version, gs.patches.rows[row], value_index == 1);
+			gs.patches_listed = false;
+			if (others)
+				g_game_settings_serial++; // other switches of its group went off: show them
+			return;
+		}
+		if (kind != game_settings_state::row_kind::item || at >= gs.items.size())
+			return;
+		setting_item& item = gs.items[at];
 		const std::vector<std::string> values = setting_values(item);
 		if (!item.node || value_index >= values.size() || item.node->to_string() == values[value_index])
 			return;

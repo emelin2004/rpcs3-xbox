@@ -13,6 +13,8 @@ add_executable(rpcs3_uwp WIN32
     uwp_telemetry.cpp
     uwp_telemetry_scrub.cpp
     uwp_update.cpp
+    uwp_patches.cpp
+    uwp_patches_json.cpp
     uwp_textinput.cpp
     uwp_stubs.cpp
     uwp_sysstubs.c
