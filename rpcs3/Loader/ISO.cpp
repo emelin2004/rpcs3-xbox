@@ -7,6 +7,7 @@
 #include "Crypto/utils.h"
 
 #include <chrono>
+#include <thread>
 #include <codecvt>
 #include <algorithm>
 #include <cmath>
@@ -824,6 +825,11 @@ iso_file_encrypted::iso_file_encrypted(const std::string& path, bs_t<fs::open_mo
 {
 }
 
+iso_file_encrypted::iso_file_encrypted(fs::file&& image, const std::string& path, const iso_fs_node& node, std::shared_ptr<iso_file_decryption> dec)
+	: iso_file(std::move(image), path, node), m_dec(dec)
+{
+}
+
 u64 iso_file_encrypted::read_at(u64 offset, void* buffer, u64 size)
 {
 	// IMPORTANT NOTES:
@@ -1475,6 +1481,74 @@ bool iso_archive::is_file(const std::string& path)
 	return !file_node->metadata.is_directory;
 }
 
+namespace
+{
+	// A handle of its own on an image whose one read handle is shared. The reads go by offset, so the position kept
+	// here is never the position of the shared handle
+	class iso_shared_image final : public fs::file_base
+	{
+		std::shared_ptr<fs::file> m_image;
+		u64 m_pos = 0;
+
+	public:
+		explicit iso_shared_image(std::shared_ptr<fs::file> image)
+			: m_image(std::move(image))
+		{
+		}
+
+		fs::stat_t get_stat() override
+		{
+			return m_image->get_stat();
+		}
+
+		bool trunc(u64 /*length*/) override
+		{
+			fs::g_tls_error = fs::error::readonly;
+			return false;
+		}
+
+		u64 read(void* buffer, u64 size) override
+		{
+			const u64 r = m_image->read_at(m_pos, buffer, size);
+			m_pos += r;
+			return r;
+		}
+
+		u64 read_at(u64 offset, void* buffer, u64 size) override
+		{
+			return m_image->read_at(offset, buffer, size);
+		}
+
+		u64 write(const void* /*buffer*/, u64 /*size*/) override
+		{
+			fs::g_tls_error = fs::error::readonly;
+			return 0;
+		}
+
+		u64 seek(s64 offset, fs::seek_mode whence) override
+		{
+			const s64 new_pos =
+				whence == fs::seek_set ? offset :
+				whence == fs::seek_cur ? offset + m_pos :
+				whence == fs::seek_end ? offset + size() : -1;
+
+			if (new_pos < 0)
+			{
+				fs::g_tls_error = fs::error::inval;
+				return -1;
+			}
+
+			m_pos = new_pos;
+			return m_pos;
+		}
+
+		u64 size() override
+		{
+			return m_image->size();
+		}
+	};
+}
+
 std::unique_ptr<fs::file_base> iso_archive::get_iso_file(const std::string& path, bs_t<fs::open_mode> mode, const iso_fs_node& node)
 {
 	if (!is_valid())
@@ -1482,12 +1556,70 @@ std::unique_ptr<fs::file_base> iso_archive::get_iso_file(const std::string& path
 		return nullptr;
 	}
 
-	if (m_dec->get_enc_type() == iso_encryption_type::NONE)
+	if (path == m_path && mode == fs::read)
 	{
-		return std::make_unique<iso_file>(path, mode, node);
+		// Every file of the image used to open the image path again. On the Xbox that open now and then fails
+		// ("cannot find the file specified" for an image on a USB drive), and the file left without a handle was a
+		// fatal "Null object" on its first seek. The files only ever read at an offset, so they can all share one
+		// handle and the image is opened once
+		std::shared_ptr<fs::file> image;
+		{
+			std::lock_guard lock(m_image_mutex);
+
+			if (!m_image)
+			{
+				auto file = std::make_shared<fs::file>(m_path, fs::read);
+
+				if (*file)
+				{
+					m_image = std::move(file);
+				}
+			}
+
+			image = m_image;
+		}
+
+		if (image)
+		{
+			fs::file view(std::make_unique<iso_shared_image>(std::move(image)));
+
+			if (m_dec->get_enc_type() == iso_encryption_type::NONE)
+			{
+				return std::make_unique<iso_file>(std::move(view), path, node);
+			}
+
+			return std::make_unique<iso_file_encrypted>(std::move(view), path, node, m_dec);
+		}
 	}
 
-	return std::make_unique<iso_file_encrypted>(path, mode, node, m_dec);
+	// Opening the image failed for a moment: try again shortly, and then give the game a file error instead of
+	// a file without a handle
+	for (int attempt = 0;; attempt++)
+	{
+		std::unique_ptr<iso_file> file;
+
+		if (m_dec->get_enc_type() == iso_encryption_type::NONE)
+		{
+			file = std::make_unique<iso_file>(path, mode, node);
+		}
+		else
+		{
+			file = std::make_unique<iso_file_encrypted>(path, mode, node, m_dec);
+		}
+
+		if (*file)
+		{
+			return file;
+		}
+
+		if (attempt >= 3)
+		{
+			// The failed open left its error in fs::g_tls_error for the caller
+			return nullptr;
+		}
+
+		std::this_thread::sleep_for(std::chrono::milliseconds(20 << attempt));
+	}
 }
 
 std::unique_ptr<fs::file_base> iso_archive::open(const std::string& path)
@@ -1548,6 +1680,14 @@ iso_file::iso_file(const std::string& path, bs_t<fs::open_mode> mode, const iso_
 		return;
 	}
 
+	m_file.seek(::at32(m_meta.extents, 0).start * ISO_SECTOR_SIZE);
+
+	m_raw_device = fs::is_optical_raw_device(path);
+}
+
+iso_file::iso_file(fs::file&& image, const std::string& path, const iso_fs_node& node)
+	: m_file(std::move(image)), m_meta(node.metadata)
+{
 	m_file.seek(::at32(m_meta.extents, 0).start * ISO_SECTOR_SIZE);
 
 	m_raw_device = fs::is_optical_raw_device(path);

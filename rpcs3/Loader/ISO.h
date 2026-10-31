@@ -6,6 +6,7 @@
 #include "util/types.hpp"
 #include "Crypto/aes.h"
 
+#include <mutex>
 #include <optional>
 #include <span>
 
@@ -158,6 +159,9 @@ public:
 	iso_file(const std::string& path, bs_t<fs::open_mode> mode = fs::read);
 	iso_file(const std::string& path, bs_t<fs::open_mode> mode, const iso_fs_node& node);
 
+	// Reads the node through "image", a handle on the image already opened ("path" is the path of the image)
+	iso_file(fs::file&& image, const std::string& path, const iso_fs_node& node);
+
 	// Points the object at another node of the same image, keeping the handle it already holds open: a caller
 	// walking many files of an image pays for a single open instead of one per file, which on a disc held by a
 	// drive is what the whole walk costs
@@ -185,6 +189,7 @@ private:
 
 public:
 	iso_file_encrypted(const std::string& path, bs_t<fs::open_mode> mode, const iso_fs_node& node, std::shared_ptr<iso_file_decryption> dec);
+	iso_file_encrypted(fs::file&& image, const std::string& path, const iso_fs_node& node, std::shared_ptr<iso_file_decryption> dec);
 
 	u64 read_at(u64 offset, void* buffer, u64 size) override;
 };
@@ -213,6 +218,10 @@ private:
 	std::string m_path;
 	iso_fs_node m_root {};
 	std::shared_ptr<iso_file_decryption> m_dec;
+
+	// One read handle on the image, shared by every file opened out of it for reading. Opened on the first such file
+	std::shared_ptr<fs::file> m_image;
+	std::mutex m_image_mutex;
 
 public:
 	// Parses the volume descriptor set and the directory records of an ISO9660 file system out of an already
