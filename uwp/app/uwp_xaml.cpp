@@ -496,6 +496,8 @@ namespace uwp_xaml
 			// State.
 			bool menu_visible = true;
 			bool pause_open = false;
+			// The pause pane, opened from the Games tab with Menu, showing one game's own settings (no game runs).
+			bool game_cfg_open = false;
 			bool job_visible = false;
 			std::optional<uwp_frontend::dialog_view> dialog;
 			std::deque<uwp_frontend::dialog_view> dialog_queue;
@@ -695,8 +697,21 @@ namespace uwp_xaml
 					root_el->add_KeyDown(make_handler<key_handler>([this](IInspectable*, IKeyRoutedEventArgs* e)
 					{
 						VirtualKey key{};
-						if (e && SUCCEEDED(e->get_Key(&key)) && (key == VirtualKey::GamepadY || key == VirtualKey::F5) && menu_visible && !modal_open())
+						if (!e || FAILED(e->get_Key(&key)) || !menu_visible || modal_open())
+							return;
+						if (key == VirtualKey::GamepadY || key == VirtualKey::F5)
 							uwp_frontend::request_rescan();
+						// Menu on the Games tab: the selected game's own settings (F2 on a keyboard).
+						else if (key == VirtualKey::GamepadMenu || key == VirtualKey::F2)
+						{
+							int32_t page = -1;
+							pivot->get_SelectedIndex(&page);
+							if (page == 0)
+							{
+								e->put_Handled(true);
+								open_game_cfg();
+							}
+						}
 					}).get(), &token);
 				}
 			}
@@ -759,12 +774,12 @@ namespace uwp_xaml
 
 			bool text_open() const { return text_serial != 0; }
 
-			bool modal_open() const { return dialog.has_value() || job_visible || pause_open || loading_shown || error_shown || screen_open || text_open(); }
+			bool modal_open() const { return dialog.has_value() || job_visible || pause_open || game_cfg_open || loading_shown || error_shown || screen_open || text_open(); }
 
 			void update_gating()
 			{
 				// Controls behind an overlay must not take the focus: disabled controls can't have it.
-				set_enabled(pivot_ctl, menu_visible && !dialog && !job_visible && !pause_open && !loading_shown && !error_shown && !screen_open && !text_open());
+				set_enabled(pivot_ctl, menu_visible && !dialog && !job_visible && !pause_open && !game_cfg_open && !loading_shown && !error_shown && !screen_open && !text_open());
 				set_enabled(pause_scroll_ctl, !dialog && !screen_open && !text_open());
 				set_enabled(screen_scroll_ctl, !dialog && !job_visible && !text_open());
 				const bool text_enabled = !dialog && !job_visible;
@@ -782,6 +797,8 @@ namespace uwp_xaml
 					request_focus(screen_buttons[std::min<usz>(screen_last, screen_buttons.size() - 1)]);
 				else if (pause_open)
 					request_focus(find_el<IInspectable>(root, L"PauseResume"));
+				else if (game_cfg_open)
+					show_pause_page(pause_at, pause_group);
 				else if (menu_visible)
 					focus_menu();
 			}
@@ -1058,7 +1075,8 @@ namespace uwp_xaml
 
 			// ---- Settings ----
 			// One row per setting: a label with its note, and a switch (on / off) or a drop-down list.
-			void build_settings(const com<IPanel>& panel, bool in_game_only, com<IControl>* first, const std::string* only_section = nullptr)
+			// `per_game`: the settings of the game open with Menu on the Games tab (game_cfg_open).
+			void build_settings(const com<IPanel>& panel, bool in_game_only, com<IControl>* first, const std::string* only_section = nullptr, bool per_game = false)
 			{
 				const auto children = children_of(panel);
 				if (!children)
@@ -1067,7 +1085,8 @@ namespace uwp_xaml
 				if (first)
 					first->reset();
 
-				const std::vector<uwp_frontend::setting_view> settings = uwp_frontend::get_settings();
+				const std::vector<uwp_frontend::setting_view> settings = per_game ? uwp_frontend::get_game_settings() : uwp_frontend::get_settings();
+				const auto set = per_game ? &uwp_frontend::set_game_setting : &uwp_frontend::set_setting;
 				std::string section;
 				for (u32 i = 0; i < settings.size(); i++)
 				{
@@ -1135,11 +1154,11 @@ namespace uwp_xaml
 					{
 						if (const auto toggle = find_el<IToggleSwitch>(row_fe, L"Control"))
 						{
-							toggle->add_Toggled(make_handler<routed_handler>([i, toggle = toggle.get()](IInspectable*, IRoutedEventArgs*)
+							toggle->add_Toggled(make_handler<routed_handler>([i, set, toggle = toggle.get()](IInspectable*, IRoutedEventArgs*)
 							{
 								boolean on = false;
 								toggle->get_IsOn(&on);
-								uwp_frontend::set_setting(i, on ? 1 : 0);
+								set(i, on ? 1 : 0);
 							}).get(), &token);
 							if (first && !*first)
 								*first = toggle.as<IControl>();
@@ -1147,12 +1166,12 @@ namespace uwp_xaml
 					}
 					else if (const auto combo = find_el<ISelector>(row_fe, L"Control"))
 					{
-						combo->add_SelectionChanged(make_handler<selection_handler>([i, combo = combo.get()](IInspectable*, ISelectionChangedEventArgs*)
+						combo->add_SelectionChanged(make_handler<selection_handler>([i, set, combo = combo.get()](IInspectable*, ISelectionChangedEventArgs*)
 						{
 							int32_t idx = -1;
 							combo->get_SelectedIndex(&idx);
 							if (idx >= 0)
-								uwp_frontend::set_setting(i, static_cast<u32>(idx));
+								set(i, static_cast<u32>(idx));
 						}).get(), &token);
 						if (first && !*first)
 							*first = combo.as<IControl>();
@@ -1213,6 +1232,10 @@ namespace uwp_xaml
 					focus_top(); // the screen may have been rebuilt meanwhile
 				else if (pause_open)
 					request_focus(find_el<IInspectable>(root, L"PauseResume"));
+				else if (game_cfg_open && pending_focus)
+				{
+					// The answer rebuilt the page, which picked its focus (the old button is gone).
+				}
 				else if (dialog_return_focus)
 					request_focus(dialog_return_focus);
 				else
@@ -1416,21 +1439,32 @@ namespace uwp_xaml
 					set_text(t_pause_title, pause_group);
 					set_text(t_pause_subtitle, pause_group.starts_with("Advanced")
 						? "These change the game's timing. Wrong values can slow it down, speed it up, hang or crash it."
+						: game_cfg_open ? "For " + uwp_frontend::game_settings_title() + " only. Applies the next time it starts."
 						: "Changes apply right away and are kept for later games.");
 					com<IControl> first;
-					build_settings(pause_settings_panel, true, &first, &pause_group);
+					build_settings(pause_settings_panel, true, &first, &pause_group, game_cfg_open);
 					request_focus(first.as<IInspectable>());
 					return;
 				}
 
-				set_text(t_pause_title, "Settings");
-				set_text(t_pause_subtitle, "The running game's settings, as in RPCS3's own menu. The rest are on the Settings tab of the app menu.");
+				if (game_cfg_open)
+				{
+					set_text(t_pause_title, uwp_frontend::game_settings_title());
+					set_text(t_pause_subtitle, uwp_frontend::game_settings_own()
+						? "This game's own settings. What isn't changed here comes from the Settings tab and the pause menu."
+						: "This game uses the app's settings. What you change here is kept for this game only.");
+				}
+				else
+				{
+					set_text(t_pause_title, "Settings");
+					set_text(t_pause_subtitle, "The running game's settings, as in RPCS3's own menu. The rest are on the Settings tab of the app menu.");
+				}
 				const auto children = children_of(pause_settings_panel);
 				if (!children)
 					return;
 				children->Clear();
 				std::vector<std::string> groups;
-				for (const auto& v : uwp_frontend::get_settings())
+				for (const auto& v : game_cfg_open ? uwp_frontend::get_game_settings() : uwp_frontend::get_settings())
 				{
 					if (v.in_game && !v.section.empty() && std::find(groups.begin(), groups.end(), v.section) == groups.end())
 						groups.push_back(v.section);
@@ -1442,7 +1476,8 @@ namespace uwp_xaml
 					replace_all(markup, L"$LABEL$", xml_text(g));
 					// Segoe MDL2 Assets glyphs, as Windows' own Settings app uses them.
 					const wchar_t* glyph = g == "Video" ? L"&#xE7F4;" : g == "Audio" ? L"&#xE767;" : g == "Stats overlay" ? L"&#xE9D9;"
-						: g == "Notifications" ? L"&#xEA8F;" : g == "Input" ? L"&#xE7FC;" : g == "Debug" ? L"&#xEBE8;" : g.starts_with("Advanced") ? L"&#xE950;" : L"&#xE713;";
+						: g == "Notifications" ? L"&#xEA8F;" : g == "Input" ? L"&#xE7FC;" : g == "Debug" ? L"&#xEBE8;" : g.starts_with("Advanced") ? L"&#xE950;"
+						: g == "CPU" ? L"&#xE964;" : g == "Network" ? L"&#xE968;" : L"&#xE713;";
 					replace_all(markup, L"$GLYPH$", glyph);
 					const com<IInspectable> entry = load_xaml(markup, "pause entry");
 					const auto button = entry.as<IButtonBase>();
@@ -1458,7 +1493,64 @@ namespace uwp_xaml
 					if (!focus || g == from)
 						focus = entry;
 				}
+				// A game's own settings can be dropped: it then boots with the app's settings again.
+				if (game_cfg_open && uwp_frontend::game_settings_saved())
+				{
+					std::wstring markup = k_xaml_pause_entry;
+					replace_all(markup, L"$LABEL$", L"Use the app's settings");
+					replace_all(markup, L"$GLYPH$", L"&#xE777;");
+					const com<IInspectable> entry = load_xaml(markup, "pause entry");
+					if (const auto button = entry.as<IButtonBase>(); button && entry.as<IUIElement>())
+					{
+						int64_t token = 0;
+						button->add_Click(make_handler<routed_handler>([this](IInspectable*, IRoutedEventArgs*)
+						{
+							show_dialog({"Use the app's settings?", "This game's own settings are removed. It starts with the settings of the Settings tab and the pause menu again.", "Remove", [this]()
+							{
+								uwp_frontend::reset_game_settings();
+								show_pause_page(pause_page::groups);
+							}});
+						}).get(), &token);
+						children->Append(entry.as<IUIElement>().get());
+					}
+				}
 				request_focus(focus);
+			}
+
+			// ---- One game's settings (Menu on the Games tab) ----
+			void open_game_cfg()
+			{
+				if (game_cfg_open || pause_open || !menu_visible || uwp_frontend::in_game())
+					return;
+				int32_t idx = -1;
+				games_sel->get_SelectedIndex(&idx);
+				if (idx < 0 || idx >= static_cast<int32_t>(snap.games.size()))
+					return;
+				if (!uwp_frontend::open_game_settings(snap.games[idx].path))
+				{
+					show_dialog({"No settings for this entry", "Only games have settings of their own. The PS3 system menu and programs use the settings of the Settings tab.", {}, {}});
+					return;
+				}
+				game_cfg_open = true;
+				show_pause_page(pause_page::groups);
+				set_visible(pause_layer, true);
+				update_gating();
+				xaml_log.notice("Game settings opened for %s", snap.games[idx].title_id);
+			}
+
+			void close_game_cfg()
+			{
+				if (!game_cfg_open)
+					return;
+				game_cfg_open = false;
+				set_visible(pause_layer, false);
+				if (const auto children = children_of(pause_settings_panel))
+					children->Clear();
+				uwp_frontend::close_game_settings();
+				update_gating();
+				if (menu_visible)
+					focus_menu();
+				xaml_log.notice("Game settings closed");
 			}
 
 			void close_pause()
@@ -1506,6 +1598,10 @@ namespace uwp_xaml
 					cancel_text();
 				else if (screen_open)
 					uwp_frontend::screen_close();
+				else if (game_cfg_open && pause_at == pause_page::group)
+					show_pause_page(pause_page::groups, pause_group);
+				else if (game_cfg_open)
+					close_game_cfg();
 				else if (pause_open && pause_at == pause_page::group)
 					show_pause_page(pause_page::groups, pause_group);
 				else if (pause_open && pause_at == pause_page::groups)
@@ -1676,6 +1772,8 @@ namespace uwp_xaml
 				}
 				if (!game && pause_open)
 					close_pause();
+				if (game && game_cfg_open)
+					close_game_cfg();
 
 				if (uwp_frontend::model_ready())
 				{

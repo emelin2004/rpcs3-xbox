@@ -56,7 +56,7 @@ set(UWP_APP_VERSION "${CMAKE_MATCH_1}")
 
 target_compile_definitions(rpcs3_uwp PRIVATE UNICODE _UNICODE RPCS3_XBOX_VERSION="${UWP_APP_VERSION}")
 target_link_libraries(rpcs3_uwp PRIVATE
-    rpcs3_emu 3rdparty::wolfssl 3rdparty::libcurl 3rdparty::hidapi 3rdparty::zlib 3rdparty::libusb 3rdparty::stblib 3rdparty::fusion
+    rpcs3_emu 3rdparty::wolfssl 3rdparty::libcurl 3rdparty::hidapi 3rdparty::zlib 3rdparty::libusb 3rdparty::stblib 3rdparty::fusion 3rdparty::yaml-cpp
     d3d11 dxgi winmm bcrypt
     # WinRT activation/strings and the UWP *FromApp APIs (import libs from mkimplibs.sh)
     winrt_activation winrt_string uwp_memory_6 uwp_memory_5 uwp_memory_3 uwp_memory_1 uwp_file_fromapp)
