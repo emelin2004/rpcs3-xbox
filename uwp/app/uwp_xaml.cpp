@@ -498,6 +498,9 @@ namespace uwp_xaml
 			bool pause_open = false;
 			// The pause pane, opened from the Games tab with Menu, showing one game's own settings (no game runs).
 			bool game_cfg_open = false;
+			u64 game_cfg_serial = 0; // uwp_frontend::game_settings_serial() the page was built at
+			std::optional<u32> game_cfg_row; // the row last used on the game's page, focused again when it is rebuilt
+			bool game_cfg_rebuild = false;   // show_pause_page() builds the same page again
 			bool job_visible = false;
 			std::optional<uwp_frontend::dialog_view> dialog;
 			std::deque<uwp_frontend::dialog_view> dialog_queue;
@@ -1076,7 +1079,9 @@ namespace uwp_xaml
 			// ---- Settings ----
 			// One row per setting: a label with its note, and a switch (on / off) or a drop-down list.
 			// `per_game`: the settings of the game open with Menu on the Games tab (game_cfg_open).
-			void build_settings(const com<IPanel>& panel, bool in_game_only, com<IControl>* first, const std::string* only_section = nullptr, bool per_game = false)
+			// `focus_row`: the setting whose control is handed back in `first` (a page rebuilt under the user's hands).
+			void build_settings(const com<IPanel>& panel, bool in_game_only, com<IControl>* first, const std::string* only_section = nullptr, bool per_game = false,
+				std::optional<u32> focus_row = std::nullopt)
 			{
 				const auto children = children_of(panel);
 				if (!children)
@@ -1140,13 +1145,20 @@ namespace uwp_xaml
 					{
 						if (const auto button = find_el<IButtonBase>(row_fe, L"Control"))
 						{
-							button->add_Click(make_handler<routed_handler>([this, i](IInspectable*, IRoutedEventArgs*)
+							button->add_Click(make_handler<routed_handler>([this, i, per_game](IInspectable*, IRoutedEventArgs*)
 							{
+								if (per_game)
+								{
+									// The game's own action rows (patch download): the next rebuild keeps the focus here.
+									game_cfg_row = i;
+									uwp_frontend::open_game_setting(i);
+									return;
+								}
 								// The next tick shows the screen (not from inside this handler: it rebuilds the page).
 								screen_last = 0;
 								uwp_frontend::open_setting(i);
 							}).get(), &token);
-							if (first && !*first)
+							if (first && (!*first || focus_row == i))
 								*first = button.as<IControl>();
 						}
 					}
@@ -1154,26 +1166,30 @@ namespace uwp_xaml
 					{
 						if (const auto toggle = find_el<IToggleSwitch>(row_fe, L"Control"))
 						{
-							toggle->add_Toggled(make_handler<routed_handler>([i, set, toggle = toggle.get()](IInspectable*, IRoutedEventArgs*)
+							toggle->add_Toggled(make_handler<routed_handler>([this, i, set, per_game, toggle = toggle.get()](IInspectable*, IRoutedEventArgs*)
 							{
 								boolean on = false;
 								toggle->get_IsOn(&on);
+								if (per_game)
+									game_cfg_row = i;
 								set(i, on ? 1 : 0);
 							}).get(), &token);
-							if (first && !*first)
+							if (first && (!*first || focus_row == i))
 								*first = toggle.as<IControl>();
 						}
 					}
 					else if (const auto combo = find_el<ISelector>(row_fe, L"Control"))
 					{
-						combo->add_SelectionChanged(make_handler<selection_handler>([i, set, combo = combo.get()](IInspectable*, ISelectionChangedEventArgs*)
+						combo->add_SelectionChanged(make_handler<selection_handler>([this, i, set, per_game, combo = combo.get()](IInspectable*, ISelectionChangedEventArgs*)
 						{
 							int32_t idx = -1;
 							combo->get_SelectedIndex(&idx);
+							if (per_game)
+								game_cfg_row = i;
 							if (idx >= 0)
 								set(i, static_cast<u32>(idx));
 						}).get(), &token);
-						if (first && !*first)
+						if (first && (!*first || focus_row == i))
 							*first = combo.as<IControl>();
 					}
 					children->Append(row_el.get());
@@ -1422,7 +1438,8 @@ namespace uwp_xaml
 				pause_group = std::move(group);
 				set_visible(find_el<IUIElement>(root, L"PauseMain"), page == pause_page::main);
 				set_visible(pause_settings_panel.as<IUIElement>(), page != pause_page::main);
-				if (const auto scroll = pause_scroll_ctl.as<IScrollViewer>())
+				const bool rebuild = std::exchange(game_cfg_rebuild, false);
+				if (const auto scroll = pause_scroll_ctl.as<IScrollViewer>(); scroll && !rebuild)
 					scroll->ScrollToVerticalOffset(0);
 
 				if (page == pause_page::main)
@@ -1436,13 +1453,16 @@ namespace uwp_xaml
 
 				if (page == pause_page::group)
 				{
+					if (game_cfg_open)
+						game_cfg_serial = uwp_frontend::game_settings_serial();
 					set_text(t_pause_title, pause_group);
 					set_text(t_pause_subtitle, pause_group.starts_with("Advanced")
 						? "These change the game's timing. Wrong values can slow it down, speed it up, hang or crash it."
 						: game_cfg_open ? "For " + uwp_frontend::game_settings_title() + " only. Applies the next time it starts."
 						: "Changes apply right away and are kept for later games.");
 					com<IControl> first;
-					build_settings(pause_settings_panel, true, &first, &pause_group, game_cfg_open);
+					build_settings(pause_settings_panel, true, &first, &pause_group, game_cfg_open, rebuild ? game_cfg_row : std::nullopt);
+					game_cfg_row.reset();
 					request_focus(first.as<IInspectable>());
 					return;
 				}
@@ -1477,7 +1497,7 @@ namespace uwp_xaml
 					// Segoe MDL2 Assets glyphs, as Windows' own Settings app uses them.
 					const wchar_t* glyph = g == "Video" ? L"&#xE7F4;" : g == "Audio" ? L"&#xE767;" : g == "Stats overlay" ? L"&#xE9D9;"
 						: g == "Notifications" ? L"&#xEA8F;" : g == "Input" ? L"&#xE7FC;" : g == "Debug" ? L"&#xEBE8;" : g.starts_with("Advanced") ? L"&#xE950;"
-						: g == "CPU" ? L"&#xE964;" : g == "Network" ? L"&#xE968;" : L"&#xE713;";
+						: g == "CPU" ? L"&#xE964;" : g == "Network" ? L"&#xE968;" : g == "Patches" ? L"&#xE90F;" : L"&#xE713;";
 					replace_all(markup, L"$GLYPH$", glyph);
 					const com<IInspectable> entry = load_xaml(markup, "pause entry");
 					const auto button = entry.as<IButtonBase>();
@@ -1774,6 +1794,12 @@ namespace uwp_xaml
 					close_pause();
 				if (game && game_cfg_open)
 					close_game_cfg();
+				// The game's page changed (a patch download ended, a patch switched others of its group off): build it again.
+				if (game_cfg_open && pause_at == pause_page::group && !dialog && game_cfg_serial != uwp_frontend::game_settings_serial())
+				{
+					game_cfg_rebuild = true;
+					show_pause_page(pause_page::group, pause_group);
+				}
 
 				if (uwp_frontend::model_ready())
 				{

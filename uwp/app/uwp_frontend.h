@@ -162,8 +162,13 @@ namespace uwp_frontend
 	std::string game_settings_title();
 	bool game_settings_own(); // the game has settings of its own (custom or built-in)
 	bool game_settings_saved(); // ... in its custom config, which reset_game_settings() removes
+	// With a Patches section: a row that downloads RPCS3's community patches (open_game_setting) and a switch per
+	// patch of the game, saved to patch_config.yml (uwp_patches.h).
 	std::vector<setting_view> get_game_settings();
 	void set_game_setting(u32 index, u32 value_index);
+	void open_game_setting(u32 index); // an action row of get_game_settings()
+	// Changes when get_game_settings() would show something else (a download ended, a patch group switched others off).
+	u64 game_settings_serial();
 	// Removes the game's custom config: config.yml (and any built-in settings) apply again.
 	void reset_game_settings();
 

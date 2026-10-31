@@ -169,6 +169,7 @@ LocalState files: `telemetry_id` (the anonymous UUID v4, shown above the firmwar
 are replaced wherever they appear, and user folders in paths, emails, IPv4/IPv6/MAC addresses,
 `password=`/`token:`-style values and other players' names in RPCN/NP lines are replaced by
 `<labels>`. Host test: `c++ -std=c++20 -I uwp/app uwp/app/uwp_telemetry_scrub.cpp uwp/app/test/telemetry_scrub_test.cpp`.
+Patch server JSON reader: `c++ -std=c++20 -I uwp/app uwp/app/uwp_patches_json.cpp uwp/app/test/patches_json_test.cpp`.
 Logs over 112 MB are sent as their first 16 and last 96 MB. Failed uploads are retried with backoff
 while the app runs (429 and 5xx; other 4xx are dropped); nothing is queued on disk. The TLS roots
 for curl are compiled in (`uwp_telemetry_roots.inc`), since the Xbox gives apps no system store.
@@ -231,7 +232,14 @@ size, SPU loop detection, write color buffers and network, for that game only. T
 the app's (the file can also be written by hand, as any subset of config.yml). It overrides everything,
 including the app's built-in game settings (Portal 2: SPU blocks Safe; Minecraft PS3 Edition: PS3
 network Disconnected, it hangs on "Finalizing" when Connected), which the first change copies into it.
-"Use the app's settings" in that menu removes the file. A setting changed in the pause menu goes to the
+"Use the app's settings" in that menu removes the file. Its Patches section holds RPCS3's community
+patches (as the desktop Patch Manager): "Download patches" fetches `patch.yml` from rpcs3.net into
+`LocalState/rpcs3/config/patches/` (checked against its SHA-256 and by the patch engine first; later
+the menu checks for a newer list once per app start), and each patch listed for the game's serial and
+version (a disc game's installed update counts) has a switch. Switches are saved to
+`patch_config.yml` and apply from the game's next start; turning one on turns off the others of its
+patch group. Patches for all games (serial "All") and adjustable patch values are not shown here (their
+defaults apply); `imported_patch.yml` and `<serial>_patch.yml` files in that folder are listed too. A setting changed in the pause menu goes to the
 game's file when the game has that setting of its own, otherwise to config.yml.
 
 Logs: `LocalState/rpcs3/RPCS3.log` and `LocalState/mesa.log`; the previous run's are kept as
