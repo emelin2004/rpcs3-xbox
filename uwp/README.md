@@ -190,8 +190,9 @@ Publishing a GitHub release tagged `v0.1.34.xx` is all an update notice needs.
 | Menu / View | Start / Select |
 | View + Menu (PS button) | Pause menu: resume, restart, trophies, RPCN friends, screenshot (PNG in `<drive>/RPCS3/screenshots/`), save / load state (in `<drive>/RPCS3/savestates/`), stop the game (back to the app menu), and the settings of RPCS3's home menu (video, audio, stats overlay, notifications, input, advanced, debug) that apply to the running game. In a game it replaces RPCS3's own home menu; on the XMB a tap is the PS button and holding ~1 s opens the pause menu |
 
-Menu: D-pad or left stick to move, A select, B back, LB/RB tabs, Y rescan. The Xbox button stays
-with the system. In the pause menu the game is paused; B resumes it.
+Menu: D-pad or left stick to move, A select, B back, LB/RB tabs, Y rescan, Menu on a game in the
+Games tab opens that game's own settings. The Xbox button stays with the system. In the pause menu
+the game is paused; B resumes it.
 
 ### LocalState switches (for testing)
 
@@ -224,9 +225,14 @@ Empty files in the app's `LocalState` folder (via Device Portal file explorer):
   By default the pipeline compiler threads do it, since a room load in Portal 2 brings dozens of
   new shaders at ~12 ms each.
 
-Per-game settings: `LocalState/rpcs3/config/custom_configs/config_<serial>.yml` (any subset of
-config.yml) overrides everything, including the app's built-in game settings (Portal 2: SPU blocks Safe;
-Minecraft PS3 Edition: PS3 network Disconnected, it hangs on "Finalizing" when Connected).
+Per-game settings: Menu on a game in the Games tab opens the pause menu's settings plus SPU block
+size, SPU loop detection, write color buffers and network, for that game only. They are saved to
+`LocalState/rpcs3/config/custom_configs/config_<serial>.yml` with only the settings that differ from
+the app's (the file can also be written by hand, as any subset of config.yml). It overrides everything,
+including the app's built-in game settings (Portal 2: SPU blocks Safe; Minecraft PS3 Edition: PS3
+network Disconnected, it hangs on "Finalizing" when Connected), which the first change copies into it.
+"Use the app's settings" in that menu removes the file. A setting changed in the pause menu goes to the
+game's file when the game has that setting of its own, otherwise to config.yml.
 
 Logs: `LocalState/rpcs3/RPCS3.log` and `LocalState/mesa.log`; the previous run's are kept as
 `RPCS3.prev.log` and `mesa.prev.log`, and the last run that booted a game also as

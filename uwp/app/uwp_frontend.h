@@ -153,6 +153,20 @@ namespace uwp_frontend
 	// An action row (setting_view::action): opens its screen, which get_screen() then shows.
 	void open_setting(u32 index);
 
+	// ---- Settings of one game (Games tab, Menu button), UI thread, while no game runs ----
+	// The pause menu's settings and a few boot-time ones, as the game boots with them. Changes are saved to the
+	// game's custom config (custom_configs/config_<serial>.yml), which RPCS3 applies on top of config.yml.
+	// False for entries without a serial (the XMB, loose programs).
+	bool open_game_settings(const std::string& path);
+	void close_game_settings();
+	std::string game_settings_title();
+	bool game_settings_own(); // the game has settings of its own (custom or built-in)
+	bool game_settings_saved(); // ... in its custom config, which reset_game_settings() removes
+	std::vector<setting_view> get_game_settings();
+	void set_game_setting(u32 index, u32 value_index);
+	// Removes the game's custom config: config.yml (and any built-in settings) apply again.
+	void reset_game_settings();
+
 	// ---- Screens the menu logic opens itself (the RPCN account screen and its text fields) ----
 	// All UI thread.
 

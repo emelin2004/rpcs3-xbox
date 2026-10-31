@@ -33,6 +33,7 @@
 #include "Utilities/File.h"
 #include "util/sysinfo.hpp"
 #include "util/cctype.hpp"
+#include "util/yaml.hpp"
 
 #include <roapi.h>
 #include <winstring.h>
@@ -932,37 +933,171 @@ namespace uwp_frontend
 			});
 		}
 
-		// Writes config.yml with `node` set to `value` while the running game keeps the current value:
-		// the change is made on a copy of g_cfg, and the file is written without reloading it (SaveSettings would).
-		bool save_setting_for_next_boot(const cfg::_base* node, const std::string& value)
+		// The names from the config root down to `node`, e.g. {"Core", "SPU Block Size"}: a path that is the same
+		// in every cfg_root and in the YAML of config.yml and the custom configs.
+		std::vector<std::string> node_path(const cfg::_base* node)
 		{
 			std::vector<std::string> names;
 			for (const cfg::_base* n = node; n && n->get_parent(); n = n->get_parent())
 				names.push_back(n->get_name());
+			std::reverse(names.begin(), names.end());
+			return names;
+		}
 
-			auto copy = std::make_shared<cfg_root>();
-			copy->from_string(g_cfg.to_string());
-			cfg::_base* target = copy.get();
-			for (auto it = names.rbegin(); it != names.rend() && target; ++it)
+		cfg::_base* find_node(cfg::_base* root, const std::vector<std::string>& names)
+		{
+			cfg::_base* target = root;
+			for (const std::string& name : names)
 			{
+				if (!target || target->get_type() != cfg::type::node)
+					return nullptr;
 				cfg::_base* next = nullptr;
 				for (cfg::_base* child : static_cast<cfg::node*>(target)->get_nodes())
 				{
-					if (child->get_name() == *it)
+					if (child->get_name() == name)
 						next = child;
 				}
 				target = next;
 			}
-			if (!target || target == copy.get() || !target->from_string(value))
-				return false;
+			return target == root ? nullptr : target;
+		}
 
-			g_host.run_on_main([copy]()
+		std::string global_config_path()
+		{
+			return fs::get_config_dir(true) + "config.yml";
+		}
+
+		bool write_config_file(const std::string& path, const std::string& text)
+		{
+			fs::pending_file temp(path);
+			if (!temp.file || (temp.file.write(text.data(), text.size()), !temp.commit()))
 			{
-				const std::string path = fs::get_config_dir(true) + "config.yml";
-				const std::string text = copy->to_string();
-				fs::pending_file temp(path);
-				if (!temp.file || (temp.file.write(text.data(), text.size()), !temp.commit()))
-					ui_log.error("UI: could not save %s (%s)", path, fs::g_tls_error);
+				ui_log.error("UI: could not save %s (%s)", path, fs::g_tls_error);
+				return false;
+			}
+			return true;
+		}
+
+		// ---- A game's own settings (custom_configs/config_<serial>.yml) as YAML: only the keys set for the game ----
+		YAML::Node load_yaml_map(const std::string& text)
+		{
+			auto [doc, error] = yaml_load(text);
+			if (!error.empty() || !doc.IsMap())
+			{
+				if (!error.empty())
+					ui_log.error("UI: could not read a game config: %s", error);
+				return YAML::Node(YAML::NodeType::Map);
+			}
+			return doc;
+		}
+
+		std::string yaml_text(const YAML::Node& doc)
+		{
+			YAML::Emitter out;
+			out << doc;
+			return std::string(out.c_str(), out.size());
+		}
+
+		// Only reads: YAML::Node's operator= changes the node it refers to, so no node is reassigned here.
+		bool yaml_has(const YAML::Node& node, const std::vector<std::string>& names, usz i = 0)
+		{
+			if (i >= names.size() || !node.IsMap())
+				return false;
+			const YAML::Node child = node[names[i]];
+			if (!child)
+				return false;
+			return i + 1 == names.size() ? child.IsScalar() : yaml_has(child, names, i + 1);
+		}
+
+		void yaml_set(YAML::Node node, const std::vector<std::string>& names, usz i, const std::string& value)
+		{
+			if (i + 1 == names.size())
+			{
+				node[names[i]] = value;
+				return;
+			}
+			if (!node[names[i]].IsMap())
+				node[names[i]] = YAML::Node(YAML::NodeType::Map);
+			yaml_set(node[names[i]], names, i + 1, value);
+		}
+
+		// Removes the key and the sections it leaves empty.
+		bool yaml_remove(YAML::Node node, const std::vector<std::string>& names, usz i)
+		{
+			if (!node.IsMap() || !node[names[i]])
+				return false;
+			if (i + 1 == names.size())
+				return node.remove(names[i]);
+			YAML::Node child = node[names[i]];
+			const bool removed = yaml_remove(child, names, i + 1);
+			if (removed && child.IsMap() && child.size() == 0)
+				node.remove(names[i]);
+			return removed;
+		}
+
+		// A game with a serial that its settings can be saved for (not the XMB or a loose program).
+		bool has_game_config(const std::string& title_id)
+		{
+			return title_id.size() == 9 && ::utils::isalpha(title_id[0]);
+		}
+
+		// Main thread: saves one setting changed while a game runs. g_cfg then also holds the game's own settings (its
+		// custom config or the built-in ones), so writing all of g_cfg would make them everyone's. When the game has
+		// that setting of its own it is changed there; otherwise in config.yml, on a copy read from the file.
+		void persist_in_game_setting(const std::vector<std::string>& names, const std::string& value)
+		{
+			if (const std::string title_id = Emu.GetTitleID(); has_game_config(title_id))
+			{
+				const std::string path = rpcs3::utils::get_custom_config_path(title_id);
+				if (fs::file f{path})
+				{
+					YAML::Node own = load_yaml_map(f.to_string());
+					f.close();
+					if (yaml_has(own, names))
+					{
+						yaml_set(own, names, 0, value);
+						if (write_config_file(path, yaml_text(own)))
+							ui_log.notice("UI: %s = %s saved for %s", fmt::merge(names, "/"), value, title_id);
+						return;
+					}
+				}
+			}
+
+			auto copy = std::make_unique<cfg_root>();
+			if (fs::file f{global_config_path()})
+				copy->from_string(f.to_string());
+			cfg::_base* target = find_node(copy.get(), names);
+			if (!target || !target->from_string(value))
+			{
+				ui_log.error("UI: could not save %s = %s", fmt::merge(names, "/"), value);
+				return;
+			}
+			write_config_file(global_config_path(), copy->to_string());
+		}
+
+		// Saves a setting the Settings tab or the pause menu changed in g_cfg.
+		void save_setting(const cfg::_base* node)
+		{
+			if (!g_in_game)
+			{
+				save_settings();
+				return;
+			}
+			g_host.run_on_main([names = node_path(node), value = node->to_string()]()
+			{
+				persist_in_game_setting(names, value);
+			});
+		}
+
+		// Saves `node` = `value` while the running game keeps the current value (applies at the next boot).
+		bool save_setting_for_next_boot(const cfg::_base* node, const std::string& value)
+		{
+			std::vector<std::string> names = node_path(node);
+			if (names.empty())
+				return false;
+			g_host.run_on_main([names = std::move(names), value]()
+			{
+				persist_in_game_setting(names, value);
 			});
 			return true;
 		}
@@ -1765,7 +1900,7 @@ namespace uwp_frontend
 				if (item.on_change)
 					item.on_change();
 				else
-					save_settings();
+					save_setting(item.node);
 			}
 		}
 
@@ -2698,6 +2833,20 @@ namespace uwp_frontend
 			ui_log.notice("UI: emulation stopped, back to the menu");
 			set_status("Returned from the game", col_dim);
 		}
+		// g_cfg still holds the game's own settings (custom or built-in config) on top of config.yml. The menu and the
+		// next boot save all of g_cfg to config.yml, so they would become every game's settings: read the file again.
+		g_host.run_on_main([]()
+		{
+			if (!Emu.IsStopped(true))
+				return; // a restart booted the game again
+			if (fs::file f{global_config_path()})
+			{
+				if (g_cfg.from_string(f.to_string()))
+					g_backup_cfg.from_string(g_cfg.to_string());
+				else
+					ui_log.error("UI: could not read config.yml again after the game");
+			}
+		});
 	}
 
 	bool loading_frame(const std::string& title, const std::string& detail, u32 done, u32 total, const u32*& pixels)
@@ -3083,10 +3232,9 @@ namespace uwp_frontend
 		return to_dialog_view(*m);
 	}
 
-	std::vector<setting_view> get_settings()
+	namespace
 	{
-		std::vector<setting_view> out;
-		for (setting_item& item : xaml_settings())
+		setting_view to_setting_view(setting_item& item)
 		{
 			setting_view v;
 			v.label = item.label;
@@ -3095,8 +3243,7 @@ namespace uwp_frontend
 			{
 				v.action = true;
 				v.value = item.value ? item.value() : std::string("Open");
-				out.push_back(std::move(v));
-				continue;
+				return v;
 			}
 			v.values = setting_values(item);
 			v.toggle = v.values.size() == 2 && v.values[0] == "false" && v.values[1] == "true";
@@ -3124,9 +3271,201 @@ namespace uwp_frontend
 			v.in_game = item.pause;
 			v.pause_only = item.pause;
 			v.section = item.section;
-			out.push_back(std::move(v));
+			return v;
+		}
+
+		// ---- Settings of one game, from the Games tab (UI thread) ----
+		// The pause menu's settings plus a few that only apply at boot, on a copy of the configuration the game boots
+		// with: config.yml, then the game's own settings. Changes go to custom_configs/config_<serial>.yml, which RPCS3
+		// applies on top of config.yml when the game boots; only the settings that differ from config.yml are kept there.
+		struct game_settings_state
+		{
+			std::string title_id, title, path;
+			std::unique_ptr<cfg_root> cfg;
+			YAML::Node own;   // the game's own settings: its custom config, or the built-in ones until something is changed
+			bool own_file = false; // the custom config exists
+			bool built_in = false; // `own` came from the built-in settings (get_database_config)
+			std::vector<setting_item> items;
+		};
+
+		std::unique_ptr<game_settings_state> g_game_settings;
+
+		std::vector<setting_item> make_game_settings()
+		{
+			std::vector<setting_item> out = make_pause_settings();
+			const auto add = [&](std::string section, std::string label, cfg::_base* node, std::vector<std::string> values, std::string note,
+				std::vector<std::string> shown = {})
+			{
+				setting_item item{std::move(label), node, std::move(values), std::move(note)};
+				item.pause = true;
+				item.section = std::move(section);
+				item.shown = std::move(shown);
+				out.push_back(std::move(item));
+			};
+			const std::vector<std::string> on_off = {"false", "true"};
+			add("Video", "Write color buffers", &g_cfg.video.write_color_buffers, on_off, "Needed by some games for correct visuals; costs speed.");
+			add("CPU", "SPU block size", &g_cfg.core.spu_block_size, {}, "How much SPU code is compiled at once. Safe works in the most games; Mega and Giga can be a little faster.");
+			add("CPU", "SPU loop detection", &g_cfg.core.spu_loop_detection, on_off, "Lets other threads run while an SPU waits in a loop. Faster in some games, slower in others.");
+			add("Network", "Network", &g_cfg.net.net_active, {"Connected", "Disconnected"}, "Internet access for this game.");
+			add("Network", "PSN", &g_cfg.net.psn_status, {}, "RPCN: online play through RPCS3's server (needs an account). Simulated: signed in, offline.");
+
+			// The game's sections in the order of the pause menu, the new ones before Debug.
+			std::stable_sort(out.begin(), out.end(), [](const setting_item& a, const setting_item& b)
+			{
+				const auto rank = [](const std::string& sec) { return sec == "Debug" ? 2 : sec == "CPU" || sec == "Network" ? 1 : 0; };
+				return rank(a.section) < rank(b.section);
+			});
+
+			for (setting_item& item : out)
+			{
+				item.on_restart = false; // nothing runs: it all applies at the game's next boot
+				item.node = find_node(g_game_settings->cfg.get(), node_path(item.node));
+			}
+			std::erase_if(out, [](const setting_item& item) { return !item.node; });
+			return out;
+		}
+
+		// Reads the game's own settings (`from_file`: its custom config, when there is one) and builds the copy they apply to.
+		void load_game_settings(bool from_file)
+		{
+			game_settings_state& gs = *g_game_settings;
+			gs.own_file = false;
+			gs.built_in = false;
+			gs.own.reset(YAML::Node(YAML::NodeType::Map));
+			fs::file f;
+			if (from_file && f.open(gs.path))
+			{
+				gs.own.reset(load_yaml_map(f.to_string()));
+				gs.own_file = true;
+			}
+			else if (const std::string db = g_emu_callbacks.get_database_config ? g_emu_callbacks.get_database_config(gs.title_id) : std::string(); !db.empty())
+			{
+				// A custom config replaces the built-in settings at boot, so the first save keeps them in it.
+				gs.own.reset(load_yaml_map(db));
+				gs.built_in = true;
+			}
+			gs.cfg = std::make_unique<cfg_root>();
+			gs.cfg->from_string(g_cfg.to_string());
+			if (gs.own.size() && !gs.cfg->from_string(yaml_text(gs.own)))
+				ui_log.error("UI: could not apply the settings of %s", gs.title_id);
+			gs.items = make_game_settings();
+		}
+
+		void save_game_settings()
+		{
+			game_settings_state& gs = *g_game_settings;
+			const std::string text = gs.own.size() ? yaml_text(gs.own) : std::string();
+			gs.built_in = false;
+			gs.own_file = !text.empty();
+			g_host.run_on_main([path = gs.path, text]()
+			{
+				if (text.empty())
+				{
+					if (fs::is_file(path) && !fs::remove_file(path))
+						ui_log.error("UI: could not remove %s (%s)", path, fs::g_tls_error);
+					return;
+				}
+				fs::create_path(rpcs3::utils::get_custom_config_dir());
+				write_config_file(path, text);
+			});
+		}
+	}
+
+	std::vector<setting_view> get_settings()
+	{
+		std::vector<setting_view> out;
+		for (setting_item& item : xaml_settings())
+			out.push_back(to_setting_view(item));
+		return out;
+	}
+
+	bool open_game_settings(const std::string& path)
+	{
+		if (g_in_game || !g_ready)
+			return false;
+		game_entry game;
+		{
+			std::lock_guard lock(g_data_mutex);
+			const auto it = std::find_if(g_games.begin(), g_games.end(), [&](const game_entry& g) { return g.path == path; });
+			if (it == g_games.end())
+				return false;
+			game = *it;
+		}
+		if (!has_game_config(game.title_id))
+			return false;
+
+		g_game_settings = std::make_unique<game_settings_state>();
+		g_game_settings->title_id = game.title_id;
+		g_game_settings->title = game.title;
+		g_game_settings->path = rpcs3::utils::get_custom_config_path(game.title_id);
+		load_game_settings(true);
+		ui_log.notice("UI: settings of %s (%s)%s", game.title, game.title_id, g_game_settings->own_file ? ", from its custom config" : g_game_settings->built_in ? ", with built-in ones" : "");
+		return true;
+	}
+
+	void close_game_settings()
+	{
+		g_game_settings.reset();
+	}
+
+	std::string game_settings_title()
+	{
+		return g_game_settings ? g_game_settings->title : std::string();
+	}
+
+	bool game_settings_own()
+	{
+		return g_game_settings && (g_game_settings->own_file || g_game_settings->built_in);
+	}
+
+	bool game_settings_saved()
+	{
+		return g_game_settings && g_game_settings->own_file;
+	}
+
+	std::vector<setting_view> get_game_settings()
+	{
+		std::vector<setting_view> out;
+		if (g_game_settings)
+		{
+			for (setting_item& item : g_game_settings->items)
+				out.push_back(to_setting_view(item));
 		}
 		return out;
+	}
+
+	void set_game_setting(u32 index, u32 value_index)
+	{
+		if (!g_game_settings || index >= g_game_settings->items.size())
+			return;
+		game_settings_state& gs = *g_game_settings;
+		setting_item& item = gs.items[index];
+		const std::vector<std::string> values = setting_values(item);
+		if (!item.node || value_index >= values.size() || item.node->to_string() == values[value_index])
+			return;
+		if (!item.node->from_string(values[value_index]))
+			return;
+
+		const std::vector<std::string> names = node_path(item.node);
+		const std::string value = item.node->to_string();
+		// Only what differs from config.yml (g_cfg out of a game) is the game's own.
+		const cfg::_base* global = find_node(&g_cfg, names);
+		if (global && global->to_string() == value)
+			yaml_remove(gs.own, names, 0);
+		else
+			yaml_set(gs.own, names, 0, value);
+		ui_log.notice("UI: %s setting '%s' = %s", gs.title_id, item.label, value);
+		save_game_settings();
+	}
+
+	void reset_game_settings()
+	{
+		if (!g_game_settings)
+			return;
+		ui_log.notice("UI: %s back to the global settings", g_game_settings->title_id);
+		g_game_settings->own.reset(YAML::Node(YAML::NodeType::Map));
+		save_game_settings(); // removes the custom config
+		load_game_settings(false); // the built-in settings apply again without it
 	}
 
 	void set_setting(u32 index, u32 value_index)
@@ -3156,7 +3495,7 @@ namespace uwp_frontend
 			if (item.on_change)
 				item.on_change();
 			else
-				save_settings();
+				save_setting(item.node);
 		}
 	}
 
