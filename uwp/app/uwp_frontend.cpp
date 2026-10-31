@@ -17,6 +17,7 @@
 #include "uwp_textinput.h"
 
 #include "Emu/System.h"
+#include "Emu/emu_callbacks.h"
 #include "Emu/system_config.h"
 #include "Emu/system_utils.hpp"
 #include "Emu/vfs_config.h"
