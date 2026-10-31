@@ -30,6 +30,7 @@ being worked on.
 | Game | State |
 | --- | --- |
 | PS3 system menu (XMB, firmware 4.93) | Works, 60 fps; network and web browser work |
+| Grand Theft Auto: San Andreas | Fully playable |
 | Minecraft PlayStation 3 Edition | Playable, 50–57 fps with small stutters (pick "Continue playing offline" at the PSN prompt); sessions up to 37 min |
 | Minecraft: Story Mode | Playable, 30 fps (the game's own cap); sessions over 2 hours |
 | DRIVER San Francisco | Playable, ~59 fps |
