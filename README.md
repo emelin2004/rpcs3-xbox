@@ -57,6 +57,8 @@ being worked on.
 
 Tried a game that isn't listed? Compatibility reports are welcome (see [Contributing](#contributing)).
 
+Some games need a setting changed first: see [uwp/GAME_SETTINGS.md](uwp/GAME_SETTINGS.md).
+
 Heavy games are mostly CPU-bound: the Xbox runs the PPU/SPU recompilers fine, but big games need
 more CPU and memory than a UWP game app gets (5 GB). The first start of the XMB or a game compiles
 its code and shaders and can take several minutes; later starts use the cache.
