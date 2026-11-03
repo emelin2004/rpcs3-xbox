@@ -6,12 +6,13 @@ Please refrain from downloading this emulator from other sources! Those Version 
 Note 2:
 Could I please have a little favor from the ones who fork this Repo, either through git or by downloading it: PLEASE remove telemetry code from your forks. There is nothing hidden in how telemetry works, the code is public, but you are spamming my telemetry server with builds of yours which don’t even launch properly… If you are already using AI even for the Builds then Please at least ask it to stop sending random data to my servers. Thanks, Emelin. 
 
-> **Proof of concept.** This is an unofficial, experimental port of the [RPCS3](https://rpcs3.net)
-> PlayStation 3 emulator to Xbox Series X|S as a UWP app (Developer Mode). It is **not** supported by
-> the RPCS3 team, so please don't ask them for help with it. Expect crashes, slow games and rough edges.
->
-> The port is about 99% vibecoded: written with AI assistance (Claude), steered and checked with my
-> previous programming knowledge. :)
+**Proof of concept.** 
+This is an unofficial, experimental port of the [RPCS3](https://rpcs3.net)
+PlayStation 3 emulator to Xbox Series X|S as a UWP app (Developer Mode). It is **not** supported by
+the RPCS3 team, so please don't ask them for help with it. Expect crashes, slow games and rough edges.
+
+The port is about 99% vibecoded: written with AI assistance (Claude), steered and checked with my
+previous programming knowledge. :)
 
 **Video of it running on YouTube** (click the picture):
 
