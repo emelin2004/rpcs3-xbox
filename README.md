@@ -1,6 +1,9 @@
 RPCS3 for Xbox (UWP)
 ====================
+Note 1:
+Please refrain from downloading this emulator from other sources! Those Version might be modified in a bad way. If you want to be 100% sure then feel free to compile this repo yourself, otherwise you can download the Package from the Release Tab of this Repo.
 
+Note 2:
 Could I please have a little favor from the ones who fork this Repo, either through git or by downloading it: PLEASE remove telemetry code from your forks. There is nothing hidden in how telemetry works, the code is public, but you are spamming my telemetry server with builds of yours which don’t even launch properly… If you are already using AI even for the Builds then Please at least ask it to stop sending random data to my servers. Thanks, Emelin. 
 
 > **Proof of concept.** This is an unofficial, experimental port of the [RPCS3](https://rpcs3.net)
