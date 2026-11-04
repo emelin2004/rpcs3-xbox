@@ -151,7 +151,15 @@ bool has_fs_write_rights(std::string_view vpath)
 	const bool has_root_perm = g_ps3_process_info.has_root_perm();
 
 	const auto parent_dir = fs::get_parent_dir_view(vpath);
-	const auto [dev_root, trail] = lv2_fs_object::get_path_root_and_trail(parent_dir);
+	auto [dev_root, trail] = lv2_fs_object::get_path_root_and_trail(parent_dir);
+
+	if (dev_root.empty())
+	{
+		// A device opened as a whole has the root as its parent: VSH mounts a simplefs image on "/dev_hdd1" and opens
+		// "/dev_hdd1" itself read-write to check it. Judged by the root it was read-only, and the write that followed
+		// was a fatal "Access is denied" (XMB, ScePafJob)
+		std::tie(dev_root, trail) = lv2_fs_object::get_path_root_and_trail(vpath);
+	}
 
 	// This is not exhaustive, PS3 has a unix filesystem with rights for each directory and files
 	// This is mostly meant to protect against games doing insane things (ie NPUB30003 => NPUB30008)
