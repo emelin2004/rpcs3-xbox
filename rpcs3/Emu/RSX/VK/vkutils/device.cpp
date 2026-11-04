@@ -124,11 +124,6 @@ namespace vk
 		optional_features_support.extended_device_fault = !!device_fault_info.deviceFault;
 		optional_features_support.provoking_vertex_last = !!provoking_vertex_info.provokingVertexLast;
 		optional_features_support.shader_draw_parameters = !!shader_draw_parameters_info.shaderDrawParameters;
-#ifdef RPCS3_UWP
-		// Passing the draw parameters index in the instance base broke XMB geometry on Dozen (0.1.35.16).
-		// Keep the push constant path the port used before.
-		optional_features_support.shader_draw_parameters = false;
-#endif
 
 		features = features2.features;
 
