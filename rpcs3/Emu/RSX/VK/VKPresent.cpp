@@ -464,12 +464,14 @@ bool VKGSRender::present_frame(const rsx::display_flip_info_t& info)
 			[](std::unique_ptr<vk::glsl::program>& prog) { vk::get_gc()->dispose(prog); });
 
 	// Video memory by use every 10 s (it comes out of the app's 5 GB on the Xbox).
-	if (static u64 s_last_mem_log = 0; get_system_time() - s_last_mem_log >= 10'000'000)
+	// The context resources do not exist yet while the shader cache loads (its progress dialog flips during on_init).
+	if (static u64 s_last_mem_log = 0; res() && get_system_time() - s_last_mem_log >= 10'000'000)
 	{
 		s_last_mem_log = get_system_time();
+		const auto resources = res();
 		rsx_log.notice("UWP VRAM: %s | pools MB: %s | texture cache %llu MB (%u unreleased), surface cache %llu MB | %s | %llu pipelines (%llu evicted)",
 			vk::get_current_mem_allocator()->get_heap_summary(), vk::vmm_get_usage_summary(),
-			res()->texture_cache.get_texture_memory_in_use() >> 20, res()->texture_cache.get_unreleased_textures_count(), res()->surface_cache.m_active_memory_used >> 20,
+			resources->texture_cache.get_texture_memory_in_use() >> 20, resources->texture_cache.get_unreleased_textures_count(), resources->surface_cache.m_active_memory_used >> 20,
 			vk::get_descriptor_pool_stats(), m_prog_buffer ? m_prog_buffer->pipeline_count() : 0, s_evicted_pipelines);
 	}
 #endif
