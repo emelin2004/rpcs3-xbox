@@ -8,7 +8,7 @@
 #include "Emu/system_config.h"
 #include "Emu/emu_callbacks.h"
 #include "Emu/IdManager.h"
-#include "Emu/RSX/Null/NullGSRender.h"
+#include "Emu/RSX/Core/RSXRendererFactory.h"
 #include "Emu/RSX/GSFrameBase.h"
 #include "Emu/Cell/Modules/cellMsgDialog.h"
 #include "Emu/Cell/Modules/cellOskDialog.h"
@@ -99,7 +99,7 @@ namespace
 		cb.init_pad_handler = [](std::string_view title_id) { ensure(g_fxo->init<named_thread<pad_thread>>(nullptr, nullptr, title_id)); };
 		cb.get_audio = []() -> std::shared_ptr<AudioBackend> { return std::make_shared<NullAudioBackend>(); };
 		cb.get_audio_enumerator = [](u64) -> std::shared_ptr<audio_device_enumerator> { return std::make_shared<null_enumerator>(); };
-		cb.init_gs_render = [](utils::serial* ar) { g_fxo->init<rsx::thread, named_thread<NullGSRender>>(ar); };
+		cb.init_gs_render = [](utils::serial* ar) { rsx::create_render_thread(ar); };
 		cb.close_gs_frame = []() {};
 		cb.get_gs_frame = []() -> std::unique_ptr<GSFrameBase> { return {}; };
 		cb.get_camera_handler = []() -> std::shared_ptr<camera_handler_base> { return std::make_shared<null_camera_handler>(); };

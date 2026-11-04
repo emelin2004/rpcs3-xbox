@@ -29,7 +29,7 @@
 #include "Emu/Cell/lv2/sys_sync.h"
 #include "Emu/emu_callbacks.h"
 #include "Emu/IdManager.h"
-#include "Emu/RSX/Null/NullGSRender.h"
+#include "Emu/RSX/Core/RSXRendererFactory.h"
 #include "Emu/RSX/GSFrameBase.h"
 #include "Emu/RSX/VK/VKGSRender.h"
 #include "Emu/Cell/Modules/cellMsgDialog.h"
@@ -144,6 +144,8 @@ namespace
 		void hide() override {}
 		void show() override {}
 		void toggle_fullscreen() override {}
+		// No native window, so it fits any backend: report the current one so it is always reused.
+		video_renderer renderer() const override { return rsx::resolve_render_backend_type(g_cfg.video.renderer); }
 
 		void delete_context(draw_context_t) override {}
 		draw_context_t make_context() override { return nullptr; }
@@ -698,15 +700,11 @@ namespace
 		};
 		g_emu_callbacks.get_audio_enumerator = [](u64) -> std::shared_ptr<audio_device_enumerator> { return std::make_shared<null_enumerator>(); };
 
-		g_emu_callbacks.init_gs_render = [](utils::serial* ar)
-		{
-			if (g_cfg.video.renderer == video_renderer::vulkan)
-				g_fxo->init<rsx::thread, named_thread<VKGSRender>>(ar);
-			else
-				g_fxo->init<rsx::thread, named_thread<NullGSRender>>(ar);
-		};
+		// The RSX thread picks the backend (Vulkan or Null) from g_cfg.video.renderer itself.
+		g_emu_callbacks.init_gs_render = [](utils::serial* ar) { rsx::create_render_thread(ar); };
 		g_emu_callbacks.close_gs_frame = []() {};
 		g_emu_callbacks.get_gs_frame = []() -> std::unique_ptr<GSFrameBase> { return std::make_unique<uwp_gs_frame>(); };
+		g_emu_callbacks.replace_gs_frame = []() -> std::unique_ptr<GSFrameBase> { return std::make_unique<uwp_gs_frame>(); };
 		g_emu_callbacks.get_camera_handler = []() -> std::shared_ptr<camera_handler_base> { return std::make_shared<null_camera_handler>(); };
 		g_emu_callbacks.get_music_handler = []() -> std::shared_ptr<music_handler_base> { return std::make_shared<null_music_handler>(); };
 

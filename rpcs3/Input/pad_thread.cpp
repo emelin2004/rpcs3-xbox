@@ -961,3 +961,18 @@ void pad_thread::open_home_menu()
 		(result ? input_log.error : input_log.notice)("opened home menu with result %d", s32{result});
 	}
 }
+
+void pad_thread::set_target_window(void* window)
+{
+	m_curwindow = window;
+
+#if !defined(ANDROID) && !defined(RPCS3_UWP)
+	for (const auto& [type, handler] : m_handlers)
+	{
+		if (type == pad_handler::keyboard)
+		{
+			static_cast<keyboard_pad_handler*>(handler.get())->SetTargetWindow(static_cast<QWindow*>(window));
+		}
+	}
+#endif
+}

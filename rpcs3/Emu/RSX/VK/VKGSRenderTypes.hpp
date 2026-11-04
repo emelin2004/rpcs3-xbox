@@ -120,24 +120,36 @@ namespace vk
 				return false;
 			}
 
-			if (vkGetFenceStatus(pool->get_owner(), m_submit_fence->handle) == VK_SUCCESS)
+			const auto status = vkGetFenceStatus(pool->get_owner(), m_submit_fence->handle);
+			switch (status)
 			{
-				lock.upgrade();
-
-				if (is_pending)
-				{
-					m_submit_fence->reset();
-					vk::on_event_completed(eid_tag);
-
-					is_pending = false;
-					eid_tag = 0;
-#ifdef RPCS3_UWP
-					needs_trim = true;
-#endif
-				}
+			case VK_SUCCESS:
+				break;
+			case VK_NOT_READY:
+				return false;
+			default:
+				// A lost device never signals the fence. Retire the work so that waiters are released.
+				if (vk::die_with_error(status)) break;
+				return false;
 			}
 
-			return !is_pending;
+			lock.upgrade();
+
+			// Retest
+			if (!is_pending)
+			{
+				return true;
+			}
+
+			m_submit_fence->reset();
+			vk::on_event_completed(eid_tag);
+
+			is_pending = false;
+			eid_tag = 0;
+#ifdef RPCS3_UWP
+			needs_trim = true;
+#endif
+			return true;
 		}
 
 		VkResult wait(u64 timeout = 0ull)
@@ -150,21 +162,33 @@ namespace vk
 			}
 
 			const auto ret = vk::wait_for_fence(m_submit_fence, timeout);
+			switch (ret)
+			{
+			case VK_SUCCESS:
+				break;
+			default:
+				// A lost device never signals the fence. Retire the work so that waiters are released.
+				// NOTE: A timeout also means the device is hung. Some drivers fail to report the loss, so VK_TIMEOUT is handled as a device loss.
+				if (vk::die_with_error(ret)) break;
+				return ret;
+			}
 
 			lock.upgrade();
 
-			if (is_pending)
+			// Retest
+			if (!is_pending)
 			{
-				m_submit_fence->reset();
-				vk::on_event_completed(eid_tag);
-
-				is_pending = false;
-				eid_tag = 0;
-#ifdef RPCS3_UWP
-				needs_trim = true;
-#endif
+				return ret;
 			}
 
+			m_submit_fence->reset();
+			vk::on_event_completed(eid_tag);
+
+			is_pending = false;
+			eid_tag = 0;
+#ifdef RPCS3_UWP
+			needs_trim = true;
+#endif
 			return ret;
 		}
 
