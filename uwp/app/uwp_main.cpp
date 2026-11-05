@@ -784,37 +784,9 @@ namespace
 		g_emu_callbacks.check_microphone_permissions = []() {};
 		g_emu_callbacks.make_video_source = []() -> std::unique_ptr<video_source> { return nullptr; };
 		g_emu_callbacks.enable_gamemode = [](bool) {};
-		// Built-in settings for single games, applied unless the game has its own custom config
-		// (LocalState/rpcs3/config/custom_configs/config_<serial>.yml, which test runs use for A/B).
-		g_emu_callbacks.get_database_config = [](const std::string& title_id) -> std::string
-		{
-			struct game_config { std::string_view title_id, why, yaml; };
-			static constexpr game_config s_games[]
-			{
-				// Portal 2: 4 SPURS threads and SPU loop detection measured on the Xbox in a big test chamber
-				// (22 -> 27 fps, no slow frames). SPU blocks stay at RPCS3's default (Safe).
-				{"BLUS30732", "Portal 2", "Core:\n  SPU Block Size: Safe\n  Max SPURS Threads: 4\n  SPU loop detection: true\n"},
-				{"BLES01222", "Portal 2", "Core:\n  SPU Block Size: Safe\n  Max SPURS Threads: 4\n  SPU loop detection: true\n"},
-				// Minecraft: PS3 Edition: with the PS3 network Connected and no PSN, a new world sits on
-				// "Finalizing" forever (the game's server thread quits right after it starts); offline it
-				// generates the world and plays (A/B on the Xbox, 0.1.34.41).
-				{"BLES01976", "Minecraft", "Net:\n  Internet enabled: Disconnected\n"},
-				{"BLUS31426", "Minecraft", "Net:\n  Internet enabled: Disconnected\n"},
-				{"NPEB01899", "Minecraft", "Net:\n  Internet enabled: Disconnected\n"},
-				{"NPUB31419", "Minecraft", "Net:\n  Internet enabled: Disconnected\n"},
-			};
-
-			for (const auto& game : s_games)
-			{
-				if (title_id == game.title_id)
-				{
-					sys_log.always()("UWP: %s (%s): built-in game settings:\n%s", title_id, game.why, game.yaml);
-					return std::string(game.yaml);
-				}
-			}
-
-			return {};
-		};
+		// No built-in settings for single games: they are listed in uwp/GAME_SETTINGS.md and set per game
+		// from the Games tab. Emulator::Load calls this unconditionally, so it has to stay set.
+		g_emu_callbacks.get_database_config = [](const std::string&) -> std::string { return {}; };
 
 		// Desktop resolves paths with Qt's canonicalFilePath (forward slashes, no trailing slash,
 		// empty if missing). Boot code relies on that, e.g. "/dev_flash" + path.substr(resolved
