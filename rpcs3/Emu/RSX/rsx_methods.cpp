@@ -812,8 +812,14 @@ namespace rsx
 		state_signals[NV4097_SET_VIEWPORT_OFFSET + 2] = rsx::vertex_state_dirty;
 		state_signals[NV4097_SET_POLYGON_STIPPLE] = rsx::fragment_program_state_dirty;
 		state_signals[NV4097_SET_CULL_FACE_ENABLE] = rsx::pipeline_config_dirty;
+#ifdef RPCS3_UWP
+		// The Xbox port emulates INVERT through the fragment state (rop_control)
+		state_signals[NV4097_SET_LOGIC_OP_ENABLE] = rsx::pipeline_config_dirty | rsx::fragment_state_dirty;
+		state_signals[NV4097_SET_LOGIC_OP] = rsx::pipeline_config_dirty | rsx::fragment_state_dirty;
+#else
 		state_signals[NV4097_SET_LOGIC_OP_ENABLE] = rsx::pipeline_config_dirty;
 		state_signals[NV4097_SET_LOGIC_OP] = rsx::pipeline_config_dirty;
+#endif
 		state_signals[NV4097_SET_BLEND_ENABLE] = rsx::pipeline_config_dirty | rsx::blend_config_dirty;
 		state_signals[NV4097_SET_BLEND_ENABLE_MRT] = rsx::pipeline_config_dirty | rsx::blend_config_dirty;
 		state_signals[NV4097_SET_STENCIL_FUNC] = rsx::pipeline_config_dirty;

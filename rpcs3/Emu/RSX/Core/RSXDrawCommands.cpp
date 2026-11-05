@@ -766,6 +766,14 @@ namespace rsx
 			}
 		}
 
+#ifdef RPCS3_UWP
+		if (REGS(m_ctx)->logic_op_enabled() && REGS(m_ctx)->logic_operation() == rsx::logic_op::logic_invert)
+		{
+			// Paired with the INVERT blend set up in VKGSRender.cpp
+			rop_control.enable_uwp_logic_invert();
+		}
+#endif
+
 		// Generate wpos coefficients
 		// wpos equation is now as follows (ignoring pixel center offset):
 		// wpos.y = (frag_coord / resolution_scale) * ((window_origin!=top)?-1.: 1.) + ((window_origin!=top)? window_height : 0)

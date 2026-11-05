@@ -24,6 +24,7 @@ namespace rsx
 		FRAG_DEPTH_24_BIT            = 10,
 		FRAG_DEPTH_FLOAT_BIT         = 11,
 		DEPTH_CLAMP_ENABLE_BIT       = 24,
+		UWP_LOGIC_INVERT_BIT         = 25, // Xbox port: shader outputs 1.0, blending turns it into 1 - dst
 
 		// Data
 		ALPHA_FUNC_OFFSET            = 12,
@@ -53,6 +54,7 @@ namespace rsx
 		void enable_framebuffer_INT() { value |= (1u << ROP_control_bits::INT_FRAMEBUFFER_BIT); }
 		void enable_MSAA_writes() { value |= (1u << ROP_control_bits::MSAA_WRITE_ENABLE_BIT); }
 		void enable_depth_clamp() { value |= (1u << ROP_control_bits::DEPTH_CLAMP_ENABLE_BIT); }
+		void enable_uwp_logic_invert() { value |= (1u << ROP_control_bits::UWP_LOGIC_INVERT_BIT); }
 
 		void set_alpha_test_func(uint func) { value |= (func << ROP_control_bits::ALPHA_FUNC_OFFSET); }
 		void set_msaa_control(uint ctrl) { value |= (ctrl << ROP_control_bits::MSAA_SAMPLE_CTRL_OFFSET); }
