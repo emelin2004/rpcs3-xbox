@@ -64,6 +64,18 @@ R"(
 	MRT3_DO(col3 = _mrt_color_t(remap_ROP_output(col3, ROP_remap));)
 #endif // _ENABLE_ROP_CHANNEL_REMAPPING
 
+#ifdef UWP_LOGIC_INVERT_BIT
+	// Xbox port: D3D12 has no logic ops on UNORM targets. For INVERT the shader writes 1.0 and the
+	// pipeline blends it as src * (1 - dst), which gives 1 - dst = ~dst for 8-bit UNORM channels.
+	if (_test_bit(rop_control, UWP_LOGIC_INVERT_BIT))
+	{
+		MRT0_DO(col0 = _mrt_color_t(vec4(1.));)
+		MRT1_DO(col1 = _mrt_color_t(vec4(1.));)
+		MRT2_DO(col2 = _mrt_color_t(vec4(1.));)
+		MRT3_DO(col3 = _mrt_color_t(vec4(1.));)
+	}
+#endif
+
 	// Commit COLOR aspect
 	MRT0_DO(ocol0 = col0;)
 	MRT1_DO(ocol1 = col1;)

@@ -337,6 +337,11 @@ namespace vk
 				for (uint index = 0; index < num_draw_buffers; ++index)
 					properties.state.enable_blend(index, VK_BLEND_FACTOR_ZERO, VK_BLEND_FACTOR_ZERO, VK_BLEND_FACTOR_ZERO, VK_BLEND_FACTOR_ZERO, VK_BLEND_OP_ADD, VK_BLEND_OP_ADD);
 				break;
+			case rsx::logic_op::logic_invert:
+				// The fragment shader writes 1.0 (UWP_LOGIC_INVERT_BIT), so src * (1 - dst) = 1 - dst = ~dst
+				for (uint index = 0; index < num_draw_buffers; ++index)
+					properties.state.enable_blend(index, VK_BLEND_FACTOR_ONE_MINUS_DST_COLOR, VK_BLEND_FACTOR_ONE_MINUS_DST_ALPHA, VK_BLEND_FACTOR_ZERO, VK_BLEND_FACTOR_ZERO, VK_BLEND_OP_ADD, VK_BLEND_OP_ADD);
+				break;
 			default:
 				if (static atomic_t<bool> s_logged = false; !s_logged.exchange(true))
 					rsx_log.todo("UWP: logic op 0x%x drawn without it (D3D12 has logic ops for UINT targets only)", static_cast<u32>(blend.logic_operation));
