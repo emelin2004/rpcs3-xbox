@@ -290,6 +290,11 @@ public:
 	// External callback to handle out of video memory problems
 	bool on_vram_exhausted(rsx::problem_severity severity);
 
+#ifdef RPCS3_UWP
+	// Xbox port: evicts unused textures on a frame boundary before the video memory cap is reached
+	void uwp_trim_texture_cache();
+#endif
+
 	// Handle pool creation failure due to fragmentation
 	void on_descriptor_pool_fragmentation(bool is_fatal);
 
