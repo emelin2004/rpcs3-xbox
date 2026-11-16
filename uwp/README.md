@@ -229,9 +229,9 @@ Empty files in the app's `LocalState` folder (via Device Portal file explorer):
 Per-game settings: Menu on a game in the Games tab opens the pause menu's settings plus SPU block
 size, SPU loop detection, write color buffers and network, for that game only. They are saved to
 `LocalState/rpcs3/config/custom_configs/config_<serial>.yml` with only the settings that differ from
-the app's (the file can also be written by hand, as any subset of config.yml). It overrides everything,
-including the app's built-in game settings (Portal 2: SPU blocks Safe; Minecraft PS3 Edition: PS3
-network Disconnected, it hangs on "Finalizing" when Connected), which the first change copies into it.
+the app's (the file can also be written by hand, as any subset of config.yml). It overrides everything.
+The app has no built-in settings for single games: the ones some games need are listed in
+[GAME_SETTINGS.md](GAME_SETTINGS.md).
 "Use the app's settings" in that menu removes the file. Its Patches section holds RPCS3's community
 patches (as the desktop Patch Manager): "Download patches" fetches `patch.yml` from rpcs3.net into
 `LocalState/rpcs3/config/patches/` (checked against its SHA-256 and by the patch engine first; later
