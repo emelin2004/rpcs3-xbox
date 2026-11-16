@@ -1243,6 +1243,83 @@ bool VKGSRender::on_vram_exhausted(rsx::problem_severity severity)
 	return any_cache_relieved;
 }
 
+#ifdef RPCS3_UWP
+// The Xbox build caps video memory far below what Dozen reports (1.5 GB by default, it comes out of
+// the app's 5 GB). A game that uploads textures quickly can go from a third of that to all of it in
+// under a second (Blitz: The League II). The allocation that fails then usually comes from inside
+// the texture cache, where evict_unused cannot take the cache lock, and the game ends. So when the
+// cap is close and the texture cache is over its quota, run the same eviction here, on a frame
+// boundary, where nothing holds the lock.
+void VKGSRender::uwp_trim_texture_cache()
+{
+	const auto resources = res();
+	if (!resources || vk::is_uninterruptible())
+	{
+		return;
+	}
+
+	static u64 s_next_check = 0;
+	const u64 now = get_system_time();
+	if (now < s_next_check)
+	{
+		return;
+	}
+
+	const auto mem_info = m_device->get_memory_mapping();
+	const u64 used = vk::vmm_get_application_memory_usage(mem_info.device_local);
+	if (!mem_info.device_local_total_bytes || used < (mem_info.device_local_total_bytes / 100) * 85)
+	{
+		return;
+	}
+
+	if (!resources->texture_cache.is_overallocated())
+	{
+		// Something else fills the memory; look again in a second
+		s_next_check = now + 1'000'000;
+		return;
+	}
+
+	// Hard sync first, as on_vram_exhausted does, so nothing in flight still uses the textures
+	flush_command_queue(true, true);
+	g_fxo->get<vk::driver_manager_thread>().drain();
+
+	// Keep the textures that are bound right now
+	std::set<u32> exclusion_list;
+	auto scan_array = [&](const auto& texture_array)
+	{
+		for (auto i = 0ull; i < texture_array.size(); ++i)
+		{
+			const auto& tex = texture_array[i];
+			const auto addr = rsx::get_address(m_ctx, tex.offset(), tex.location());
+			exclusion_list.insert(addr);
+		}
+	};
+
+	scan_array(REGS(m_ctx)->fragment_textures);
+	scan_array(REGS(m_ctx)->vertex_textures);
+
+	bool relieved = false;
+	{
+		// Hold the secondary lock guard to prevent threads from trying to touch access violation handler stuff
+		std::lock_guard lock(m_secondary_cb_guard);
+		relieved = resources->texture_cache.evict_unused(exclusion_list);
+	}
+
+	relieved |= resources->texture_cache.handle_memory_pressure(rsx::problem_severity::severe);
+
+	if (relieved)
+	{
+		m_samplers_dirty.store(true);
+	}
+
+	rsx_log.warning("UWP: video memory at %lluM of %lluM, trimmed the texture cache on the frame boundary (%s)",
+		used >> 20, mem_info.device_local_total_bytes >> 20, relieved ? "textures evicted" : "nothing to evict");
+
+	// Evicting costs a hard sync and re-uploads. Don't repeat it every frame if it doesn't help.
+	s_next_check = now + (relieved ? 1'000'000 : 10'000'000);
+}
+#endif
+
 void VKGSRender::on_descriptor_pool_fragmentation(bool is_fatal)
 {
 	if (!is_fatal)

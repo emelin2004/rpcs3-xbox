@@ -205,7 +205,12 @@ namespace vk
 #if !defined(__APPLE__) || !defined(ARCH_X64)
 		case CELL_GCM_TEXTURE_R5G6B5: return VK_FORMAT_R5G6B5_UNORM_PACK16;
 		case CELL_GCM_TEXTURE_R6G5B5: return VK_FORMAT_R5G6B5_UNORM_PACK16; // Expand, discard high bit?
+#ifdef RPCS3_UWP
+		// D3D12 has no R5G5B5A1, so Dozen fails to create the image. The upload expands it to B8G8R8A8 (TextureUtils.cpp)
+		case CELL_GCM_TEXTURE_R5G5B5A1: return VK_FORMAT_B8G8R8A8_UNORM;
+#else
 		case CELL_GCM_TEXTURE_R5G5B5A1: return VK_FORMAT_R5G5B5A1_UNORM_PACK16;
+#endif
 		case CELL_GCM_TEXTURE_D1R5G5B5: return VK_FORMAT_A1R5G5B5_UNORM_PACK16;
 		case CELL_GCM_TEXTURE_A1R5G5B5: return VK_FORMAT_A1R5G5B5_UNORM_PACK16;
 		case CELL_GCM_TEXTURE_A4R4G4B4: return support.rgba4_unorm ? VK_FORMAT_R4G4B4A4_UNORM_PACK16 : VK_FORMAT_B4G4R4A4_UNORM_PACK16;

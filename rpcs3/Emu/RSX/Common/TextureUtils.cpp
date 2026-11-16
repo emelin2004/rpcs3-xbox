@@ -184,6 +184,68 @@ struct convert_16_block_32_swizzled
 };
 #endif
 
+#ifdef RPCS3_UWP
+// Xbox port: D3D12 has no 16-bit format with the alpha bit at the bottom (R5G5B5A1), so Dozen cannot
+// create such an image. These textures are expanded to B8G8R8A8 here, as the Apple path does.
+u32 uwp_convert_rgb5a1_to_bgra8(const u16 bits)
+{
+	const u32 r5 = ((bits >> 11) & 0x1F);
+	const u32 g5 = ((bits >> 6) & 0x1F);
+	const u32 b5 = ((bits >> 1) & 0x1F);
+
+	const u32 b8 = ((b5 * 527) + 23) >> 6;
+	const u32 g8 = ((g5 * 527) + 23) >> 6;
+	const u32 r8 = ((r5 * 527) + 23) >> 6;
+	const u32 a8 = (bits & 1) ? 255 : 0;
+
+	return b8 | (g8 << 8) | (r8 << 16) | (a8 << 24);
+}
+
+void uwp_copy_rgb5a1_as_bgra8(std::span<u32> dst, std::span<const be_t<u16>> src, u16 width_in_block, u16 row_count, u16 depth, u8 border, u32 dst_pitch_in_block, u32 src_pitch_in_block, bool is_swizzled)
+{
+	rsx::simple_array<be_t<u16>> tmp;
+
+	if (is_swizzled)
+	{
+		u32 padded_width = width_in_block, padded_height = row_count;
+		if (border)
+		{
+			padded_width = rsx::next_pow2(width_in_block + border + border);
+			padded_height = rsx::next_pow2(row_count + border + border);
+		}
+
+		tmp.resize(padded_width * padded_height * depth * 2);
+		rsx::convert_linear_swizzle_3d<be_t<u16>>(src.data(), tmp.data(), padded_width, padded_height, depth);
+
+		src = tmp;
+		src_pitch_in_block = padded_width;
+	}
+
+	u32 src_offset = 0, dst_offset = 0;
+	const u32 v_porch = src_pitch_in_block * border;
+
+	for (u32 layer = 0; layer < depth; ++layer)
+	{
+		// Front
+		src_offset += v_porch;
+
+		for (u32 row = 0; row < row_count; ++row)
+		{
+			for (u32 col = 0; col < width_in_block; ++col)
+			{
+				dst[dst_offset + col] = uwp_convert_rgb5a1_to_bgra8(src[src_offset + col + border]);
+			}
+
+			src_offset += src_pitch_in_block;
+			dst_offset += dst_pitch_in_block;
+		}
+
+		// Back
+		src_offset += v_porch;
+	}
+}
+#endif
+
 struct copy_unmodified_block
 {
 	template<typename T, typename U>
@@ -957,10 +1019,21 @@ namespace rsx
 			break;
 		}
 
+#ifdef RPCS3_UWP
+		case CELL_GCM_TEXTURE_R5G5B5A1:
+		{
+			// Stored as B8G8R8A8 on the Xbox (see uwp_copy_rgb5a1_as_bgra8)
+			uwp_copy_rgb5a1_as_bgra8(dst_buffer.as_span<u32>(), src_layout.data.as_span<const be_t<u16>>(), w, h, depth, src_layout.border, get_row_pitch_in_block<u32>(w, caps.alignment), src_layout.pitch_in_block, is_swizzled);
+			break;
+		}
+#endif
+
 		case CELL_GCM_TEXTURE_D1R5G5B5:
 		case CELL_GCM_TEXTURE_A1R5G5B5:
 		case CELL_GCM_TEXTURE_A4R4G4B4:
+#ifndef RPCS3_UWP
 		case CELL_GCM_TEXTURE_R5G5B5A1:
+#endif
 		case CELL_GCM_TEXTURE_R5G6B5:
 #else
 		// convert the following formats to B8G8R8A8_UNORM, because they are not supported by Metal

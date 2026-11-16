@@ -62,6 +62,17 @@ namespace vk
 		info.imageType = image_type;
 		info.format = format;
 		info.extent = { width, height, depth };
+#ifdef RPCS3_UWP
+		// A game can ask for an image with no width or height (3D Dot Game Heroes: 0x256). Desktop drivers
+		// put up with it; D3D12 rejects it, Dozen reports no size and the allocation ends the game.
+		if (!width || !height || !depth) [[unlikely]]
+		{
+			if (static atomic_t<bool> s_logged = false; !s_logged.exchange(true))
+				rsx_log.error("UWP: image with an empty extent (%ux%ux%u, format %d) created as 1 texel", width, height, depth, static_cast<int>(info.format));
+
+			info.extent = { std::max<u32>(width, 1), std::max<u32>(height, 1), std::max<u32>(depth, 1) };
+		}
+#endif
 		info.mipLevels = mipmaps;
 		info.arrayLayers = layers;
 		info.samples = samples;

@@ -2772,6 +2772,22 @@ namespace uwp_frontend
 			return false;
 		}
 
+		// The drive was there when the app started, but it can be unplugged (or go to sleep) later. Emu.Init
+		// then stops with "Cannot use 'E:/RPCS3/dev_hdd1/' for Virtual File System because it does not exist",
+		// which reached the player as a crash. Check the PS3 drives again before every boot.
+		for (const std::string dir : {g_cfg_vfs.get(g_cfg_vfs.dev_hdd0), g_cfg_vfs.get(g_cfg_vfs.dev_hdd1)})
+		{
+			if (dir.empty() || fs::is_dir(dir) || fs::create_path(dir))
+				continue;
+
+			ui_log.error("UWP: not booting '%s': %s is not reachable (%s)", path, dir, fs::g_tls_error);
+			set_status("Connect the USB drive to play", col_err);
+			post_modal("USB drive not found",
+				fmt::format("The app can't reach %s. Your games and saves are on that drive.\n\n"
+					"Connect the drive again and restart the app.", dir.substr(0, 2)));
+			return false;
+		}
+
 		// In App mode the Xbox gives the app 1 GB instead of 5 GB, and every game dies at boot (out of video
 		// memory). A reinstall sets it back to App mode: LittleBigPlanet on 0.1.35.0 died 4 times in a row
 		// at 1.25 GB "of 1.000 GB" before the player switched it.

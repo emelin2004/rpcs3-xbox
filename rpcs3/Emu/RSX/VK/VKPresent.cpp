@@ -1042,6 +1042,10 @@ bool VKGSRender::present_frame(const rsx::display_flip_info_t& info)
 
 void VKGSRender::post_present()
 {
+#ifdef RPCS3_UWP
+	uwp_trim_texture_cache();
+#endif
+
 	// Data sync
 	const rsx::surface_scaling_config_t active_res_scaling_config =
 	{
