@@ -216,6 +216,9 @@ namespace glsl
 				{ "FRAG_DEPTH_24_BIT           ", rsx::ROP_control_bits::FRAG_DEPTH_24_BIT },
 				{ "FRAG_DEPTH_FLOAT_BIT        ", rsx::ROP_control_bits::FRAG_DEPTH_FLOAT_BIT },
 				{ "DEPTH_CLAMP_ENABLE_BIT      ", rsx::ROP_control_bits::DEPTH_CLAMP_ENABLE_BIT },
+#ifdef RPCS3_UWP
+				{ "UWP_LOGIC_INVERT_BIT        ", rsx::ROP_control_bits::UWP_LOGIC_INVERT_BIT },
+#endif
 				{ "MRT_CHANNEL_REMAP_OFFSET    ", rsx::ROP_control_bits::MRT_CHANNEL_REMAP_OFFSET },
 				{ "MRT_CHANNEL_REMAP_LENGTH    ", rsx::ROP_control_bits::MRT_CHANNEL_REMAP_NUM_BITS },
 				{ "MRT_BLEND_TARGETS_OFFSET    ", rsx::ROP_control_bits::MRT_BLEND_TARGETS_OFFSET },
