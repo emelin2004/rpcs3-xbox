@@ -559,9 +559,17 @@ void VKFragmentDecompilerThread::insertMainEnd(std::stringstream & OS)
 		RSX_SHADER_CONTROL_PROGRAMMABLE_BLENDING |
 		RSX_SHADER_CONTROL_EMULATE_DEPTH_RANGE;
 
+#ifdef RPCS3_UWP
+	// Xbox port: the ROP epilogue always tests UWP_LOGIC_INVERT_BIT in rop_control (INVERT logic op
+	// emulation), so every fragment shader needs rop_control, not only those with the options above.
+	OS << "	const uint rop_control = fs_contexts[_fs_context_offset].rop_control;\n";
+#endif
+
 	if (m_prog.ctrl & ROP_control_access_options)
 	{
+#ifndef RPCS3_UWP
 		OS << "	const uint rop_control = fs_contexts[_fs_context_offset].rop_control;\n";
+#endif
 
 		if (m_prog.ctrl & RSX_SHADER_CONTROL_ALPHA_TEST)
 		{
